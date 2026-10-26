@@ -309,6 +309,7 @@ class StudioDocker(DockWidget):
         self.preview.dragFinished.connect(self._drag_finished)
         self.preview.splitMoved.connect(self._split_moved)
         self.preview.splitReleased.connect(self._split_released)
+        self.form.scrubFinished.connect(self._drag_finished)
         self.form.buttonPressed.connect(lambda _i: self._run_preview())
         self.fav.clicked.connect(self._toggle_favorite)
         self.reset.clicked.connect(self.form.reset)
@@ -840,7 +841,7 @@ class StudioDocker(DockWidget):
 
     def _on_params_changed(self):
         if self.live.isChecked() and self.fdef:
-            if self.preview.dragging:                     # follow the handle: no waiting, a small fast image
+            if self.preview.dragging or self.form.scrubbing:     # follow the handle or slider: no waiting, a small fast image
                 self.timer.stop()
                 self._run_preview(interactive=True)
             else:
@@ -854,7 +855,7 @@ class StudioDocker(DockWidget):
             self._refresh_handles()
 
     def _drag_finished(self):
-        """Let go of a handle: one full-quality render of where it ended up."""
+        """Let go of a handle or slider: one full-quality render of where it ended up."""
         if self.live.isChecked() and self.fdef:
             self._run_preview()
 

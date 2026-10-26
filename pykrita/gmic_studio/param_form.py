@@ -29,6 +29,8 @@ def _slider_window(p):
 class SliderSpin(W.QWidget):
     """Slider + number box pair, like Krita's own slider-spin boxes."""
     valueChanged = pyqtSignal()
+    scrubStarted = pyqtSignal()             # the slider handle was picked up ...
+    scrubEnded = pyqtSignal()               # ... and let go
 
     def __init__(self, minimum, maximum, value, integer, slider_range=None):
         """`slider_range`: the part of the number range the slider covers (the number box may go beyond it)."""
@@ -51,6 +53,8 @@ class SliderSpin(W.QWidget):
         lay.addWidget(self.spin)
         self.set_value(value)
         self.slider.valueChanged.connect(self._from_slider)
+        self.slider.sliderPressed.connect(self.scrubStarted)
+        self.slider.sliderReleased.connect(self.scrubEnded)
         self.spin.valueChanged.connect(self._from_spin)
 
     def _to_slider(self, v):
@@ -216,6 +220,7 @@ class ParamForm(W.QWidget):
     changed = pyqtSignal()
     locksChanged = pyqtSignal(int)            # how many values of the current filter are locked
     buttonPressed = pyqtSignal(int)           # a button parameter was pressed (its index)
+    scrubFinished = pyqtSignal()              # a slider was let go (after changes made while it was held)
 
     def __init__(self):
         super().__init__()
@@ -227,6 +232,7 @@ class ParamForm(W.QWidget):
         self._locks = {}     # filter id -> set of locked parameter indices (text)
         self._labels = {}    # param index -> LockLabel
         self._pressed = set()   # button parameters pressed for the next run only
+        self._scrubbing = 0     # sliders being held right now
         self._silent = False    # setting values from a filter's report: no new preview
         self._hidden = {}       # hidden `value` parameters: they start at their default, a filter may report new ones
         self._shown = set()     # buttons behind the preview now on screen; Apply repeats them until a value changes
@@ -287,6 +293,7 @@ class ParamForm(W.QWidget):
         self._pressed = set()
         self._shown = set()
         self._hidden = {}
+        self._scrubbing = 0
         self._fdef = None
 
     def set_filter(self, fdef, values=None):
@@ -363,6 +370,19 @@ class ParamForm(W.QWidget):
             self._silent = False
         return moved
 
+    @property
+    def scrubbing(self):
+        """True while a slider handle is held: the preview should follow quickly instead of waiting."""
+        return self._scrubbing > 0
+
+    def _scrub_started(self):
+        self._scrubbing += 1
+
+    def _scrub_ended(self):
+        self._scrubbing = max(0, self._scrubbing - 1)
+        if not self._scrubbing:
+            self.scrubFinished.emit()
+
     def _press(self, index):
         self._pressed.add(index)
         self.buttonPressed.emit(index)
@@ -404,6 +424,8 @@ class ParamForm(W.QWidget):
             f.addRow(lab)
         elif k in ("int", "float"):
             w = SliderSpin(p.minimum, p.maximum, p.default, k == "int", slider_range=_slider_window(p))
+            w.scrubStarted.connect(self._scrub_started)
+            w.scrubEnded.connect(self._scrub_ended)
             f.addRow(self._label(i, p), self._register(i, w, w.value, w.set_value, w.valueChanged))
         elif k == "bool":
             w = W.QCheckBox()

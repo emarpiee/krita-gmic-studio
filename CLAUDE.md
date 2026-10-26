@@ -9,3 +9,7 @@ Guidance for Claude Code in this repo (G'MIC Studio, a Krita docker plugin). See
 - One gmic process at a time, always under `nice -n 19`. No parallel jobs, no repeated long loops.
 - Do not leave background jobs running. Stop what you started (by its own PID, never `pkill` by name) before moving on.
 - Run tests with no `DISPLAY`. Keep scratch files in the job's temp folder.
+
+## Commit after every successful run
+
+After a change whose tests pass (and `tools/smoke_gmic.py` when the engine changed), commit it right away, without asking. Check for big files first (see the vault's `CLAUDE.md`; `dist/` is ignored). End the message with the attribution line the harness gives. Do not commit when tests fail.

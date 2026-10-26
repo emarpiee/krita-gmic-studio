@@ -1917,6 +1917,22 @@ def test_pressing_a_button_previews_even_when_live_is_off(app, studio):
     assert seen[1]["1"] == 0                                                  # released after the one run
 
 
+def test_holding_a_slider_renders_without_waiting_and_ends_with_a_full_render(app, studio):
+    d = _make_docker(app, studio, doc=False)
+    d._show_filter(studio.index.get("Basics > Blur"), None)
+    calls = []
+    d.studio.request_preview = lambda f, values, force_full=False, interactive=False: calls.append(interactive)
+    slider = d.form.findChildren(QtWidgets.QSlider)[0]
+    slider.sliderPressed.emit()                                               # the handle is picked up
+    assert d.form.scrubbing
+    slider.setValue(slider.value() + 3)                                       # moved while held
+    assert calls == [True] and not d.timer.isActive()                         # immediate, small and fast
+    slider.sliderReleased.emit()
+    assert not d.form.scrubbing and calls == [True, False]                    # let go: one full-quality render
+    slider.setValue(slider.value() + 1)                                       # a click or key press: the normal delayed preview
+    assert calls == [True, False] and d.timer.isActive()
+
+
 def test_dragging_a_handle_renders_without_waiting_and_ends_with_a_full_render(app, studio):
     from gmic_studio.compat import QtGui
     d = _make_docker(app, studio, doc=False)
