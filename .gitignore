@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 dist/
+
+# Local working notes (not part of the plugin)
+HANDOFF.md
+CLAUDE.md
