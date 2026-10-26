@@ -1,6 +1,8 @@
 # G'MIC Studio (Krita plugin)
 
-A docker-based, non-blocking alternative to Krita's modal G'MIC-Qt dialog. Pure Python (PyQt5 for Krita 5, PyQt6 for Krita 6, same code), so one zip works on Windows, macOS and Linux. Works offline.
+A docker-based, non-blocking alternative to Krita's modal G'MIC-Qt dialog. Pure Python (PyQt5 for Krita 5, PyQt6 for Krita 6, same code), written to run on Windows, macOS and Linux from one zip. Works offline.
+
+**Tested only on Linux** (Krita 6, gmic 3.7.4). The Windows and macOS code paths (config folders, finding and downloading gmic, console windows) are written but have never been run: expect rough edges there, and run `python tools/smoke_gmic.py` first to check your gmic.
 
 It runs the standalone `gmic` program in a background process and reads the filter catalogue from G'MIC itself, so Krita stays usable while you tune a filter.
 
@@ -70,4 +72,4 @@ Do not import `tests/test_plugin.py` from a second test file (it hangs); add tes
 - gmic cannot take an empty argument, so an empty folder parameter is sent as `.`; empty text or file fields make some filters fail.
 - Duplicate preview modes and filter-drawn splits need gmic to render the layout, so they update on release rather than while dragging.
 - Each preview starts a gmic process (about 0.1 s of start-up on a fast machine), which limits how smooth live scrubbing can be.
-- Tested against gmic 3.7.4 and PyQt6; the PyQt5 path is covered by the test suite but has not been run against a real Krita 5 recently.
+- Tested against gmic 3.7.4 and PyQt6 on Linux only. Windows and macOS are untested, and the PyQt5 path is covered by the test suite but has not been run against a real Krita 5 recently.
