@@ -1,0 +1,36 @@
+# Small offline starter set built on native G'MIC commands.
+# The full catalogue comes from G'MIC's own update*.gmic cache (see Manual.html).
+
+#@gui Basics > Blur : blur
+#@gui : Amount = float(2,0,50)
+
+#@gui Basics > Sharpen : sharpen
+#@gui : Amount = float(100,0,500)
+
+#@gui Basics > Unsharp Mask : unsharp
+#@gui : Radius = float(2,0,20)
+#@gui : Amount = float(2,0,10)
+#@gui : Threshold = float(0,0,100)
+
+#@gui Basics > Median : median
+#@gui : Size = int(3,1,20)
+
+#@gui Basics > Add Noise : noise
+#@gui : Amount = float(20,0,100)
+#@gui : Type = choice(0,"Gaussian","Uniform","Salt and Pepper","Poisson","Rice")
+
+#@gui Basics > Normalize : normalize
+#@gui : Minimum = float(0,0,255)
+#@gui : Maximum = float(255,0,255)
+
+#@gui Basics > Posterize : quantize
+#@gui : Levels = int(6,2,32)
+#@gui : Keep values = bool(0)
+
+#@gui Basics > Threshold : threshold
+#@gui : Value = float(128,0,255)
+#@gui : Soft = bool(0)
+
+#@gui Basics > Negative : negate
+
+#@gui Basics > Sepia : sepia

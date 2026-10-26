@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>G'MIC Studio</title></head>
+<body>
+<h1>G'MIC Studio</h1>
+<p>A docker for running <a href="https://gmic.eu">G'MIC</a> filters on the active paint layer. It runs entirely offline.
+The only network access is the optional <em>Update filter list</em> button in Settings.</p>
+
+<h2>Setup</h2>
+<ol>
+<li>Enable the plugin in <em>Settings &gt; Configure Krita &gt; Python Plugin Manager</em> and restart Krita.</li>
+<li>Show the docker: <em>Settings &gt; Dockers &gt; G'MIC Studio</em>. Its own settings are behind the gear next to the search box; the line about gmic only appears when gmic is missing.</li>
+<li><strong>Filter list.</strong> The docker shows the same filters as Krita's G'MIC-Qt. It reads the list G'MIC-Qt caches in its config folder
+(<code>gmic_qt_filters.dat</code>), so open <em>Filters &gt; G'MIC-Qt</em> once and let it load. Without that cache you get a small built-in set;
+<em>Settings &gt; Update filter list</em> downloads the full list (only when you click it).</li>
+<li><strong>The gmic program.</strong> Krita's own G'MIC-Qt cannot be driven by other plugins, so G'MIC Studio runs the standalone <code>gmic</code> command-line program.
+Open <em>Settings &gt; Get gmic...</em>: on Windows it downloads the official build from gmic.eu into the plugin's private folder; on Linux and macOS it shows
+the package-manager command for your system (for example <code>sudo dnf install --setopt=install_weak_deps=False gmic</code>). You can also use <em>Browse</em> or <em>Import from archive</em>.
+The Flatpak build of Krita cannot see programs installed on the host, so use <em>Import from archive</em> there. Keep gmic reasonably up to date: filters newer than your gmic report "unknown command".</li>
+</ol>
+
+<h2>Using it</h2>
+<ul>
+<li>Search or browse the filter list. Star a filter to pin it under <em>Favorites</em>. The <em>Recent</em> button next to the search box opens a menu of the filters you used recently; choosing one opens it in its category, and <em>Clear recent filters</em> at the bottom empties the list. In the search box, <em>Esc</em> clears the text and a second <em>Esc</em> leaves the box, <em>Enter</em> moves to the results so the arrow keys step through them, and clicking empty space also leaves it. The list remembers which categories you opened and where you scrolled, so applying a filter or pressing undo/redo never closes them.</li>
+<li>Change parameters. With <em>Live preview</em> on, the preview re-renders after a short pause, and old renders are cancelled when you keep tweaking. It also refreshes by itself when you switch layers, change the selection or paint (Krita does not announce these, so the docker checks about once a second; turn it off in Settings if you prefer <em>Refresh</em>). A busy bar shows while it renders; a slow filter that keeps restarting while you drag a slider is the usual reason a preview seems stuck. Hold <em>Compare</em> to see the original. Point parameters show as handles on the preview; dragging one updates the preview live (on a smaller, faster image) and renders full quality when you let go. <em>Button</em> parameters (such as <em>Reset 3D Position</em>) run the filter once with the button pressed; parameters G'MIC marks as hidden stay out of sight and ones it marks as unavailable are grayed out. Some filters change the picture's size (3D views with their own Width and Height, borders). The preview then shows the whole result with a dashed frame marking the part that lies over your canvas; <em>&#8943; &rarr; Keep the original size</em> cuts the result to that frame, in the preview and in Apply. The <em>&#8943;</em> menu's <em>Preview mode</em> offers G'MIC-Qt's views: forward/backward horizontal and vertical splits and checkered (with a draggable divider) and the duplicate layouts. The <em>&#8635;</em> button renders the preview again at full size, <em>Fit</em> and <em>100%</em> change the zoom (the zoom level is shown inside the preview), and the <em>&#8943;</em> menu holds the forced-transparency, auto-refresh and new-seed options. The status line says what the preview shows:
+<ul><li><strong>whole image</strong>: images up to about 3 megapixels are previewed by running exactly the job Apply would run, so the preview matches the result;</li>
+<li><strong>scaled image</strong> / <strong>1:1 crop</strong>: bigger images follow the filter's own preview setting (G'MIC-Qt's rule): a scaled-down whole image for filters made for it, otherwise a crop at actual size around the selection or the canvas centre. Such previews can differ from the final result for filters that depend on image size.</li></ul>
+<strong>Random filters</strong> (Blockism, Array [Random Colors], ...) use one random seed for both the preview and Apply, so the result you see is the result you get. Choose <em>New random seed</em> in the <em>&#8943;</em> menu above the preview (or in the <em>Randomize</em> menu) to roll a different one.</li>
+<li><strong>Zoom the preview</strong> with the mouse wheel (it zooms at the cursor), drag to pan, double-click to switch between fit and 100%, or use the <em>Fit</em> and <em>100%</em> buttons. Transparent areas show as a checkerboard.</li>
+<li><strong>Presets in the document.</strong> <em>Save preset...</em> asks where to keep a preset: <em>My library</em> (a file, available in every document; the default), <em>This document</em> (stored inside the .kra file, so it travels with it and shows up whenever the file is opened), or both (tick both boxes: you get one independent copy in each). The two places are separate and are never merged behind your back. Right-click a preset to <em>Copy</em> it to the other place. The <em>Presets</em> tab lists both (document presets are marked <em>[document]</em>), and the box next to <em>This filter only</em> narrows it to one source. A document preset is saved with the file, so save the document after adding one; Krita is told the document changed.</li>
+<li><strong>Presets</strong> live in one library, listed together on the <em>Presets</em> tab next to <em>Filters</em>: every preset of every filter in one flat list, so there is nothing to browse through. The most recently used come first. Click one to load and preview it (it switches to its filter with its values), double-click to apply it, or use the Up and Down arrow keys in the list to step through it and watch the preview change. The search box searches both tabs and jumps to the one that has results. Tick <em>Only this filter's presets</em> to narrow the list to the current filter.
+<ul><li><em>Save preset...</em> stores the filter and its current values; tick the box to also remember the random seed, so a random filter reproduces the exact look. <em>Update</em> overwrites the loaded preset with the current values.</li>
+<li>Right-click a preset, or use the <em>...</em> menu, to rename, delete, export or import presets and to open the presets folder.</li>
+<li>Presets are kept in one file in the plugin's config folder. <em>Settings &gt; Presets file</em> moves the library file, for example into a synced folder, and export/import shares presets as a file.</li></ul></li>
+
+
+<li><em>Apply</em> runs the filter in the background; the list next to it decides what happens with the result (Krita cannot record direct pixel edits from plugins, but it does record layers, so every mode is undoable):
+<ul><li><strong>New layer</strong>: the result goes on a copy of the layer above the original, which stays. Ctrl+Z removes the new layer.</li>
+<li><strong>New layer, hide original</strong>: the same, then the original is hidden. Ctrl+Z twice undoes both.</li>
+<li><strong>Replace original</strong>: the result takes the original's name, position and masks and the original is removed. Ctrl+Z twice brings it back.</li></ul>
+<em>Stop</em> cancels a running filter.</li>
+
+<li><em>Tools &gt; Scripts &gt; Repeat Last G'MIC Studio Filter</em> re-applies the last filter with the same values. Assign a shortcut under <em>Settings &gt; Configure Krita &gt; Keyboard Shortcuts</em>.</li>
+<li>An active selection limits the filter, including soft (feathered) edges.</li>
+<li><strong>Transparency.</strong> Like Krita's own G'MIC, filters receive the layer with its transparency (RGBA), so filters that move or tile content keep the transparent background. A few filters only accept RGB images; in the default <em>Automatic</em> mode the plugin retries those on the colors alone and puts the original transparency back. Change this in Settings.</li>
+<li><strong>Force transparent background</strong> (off by default). Many filters paint an opaque fill (often black) over the transparent parts of a layer. Some of them have their own parameter for a transparent result (look for something like <em>Result Type</em> or a background option); use that when it exists. For the filters that do not, tick <em>Force transparent background</em> (in the <em>&#8943;</em> menu above the preview and in Settings) and one general rule clears the fill, with no special cases for particular filters:
+<ul><li>The plugin looks at spots that were transparent in your layer. If the filter turned them all into (roughly) the same opaque color, that color is the filter's background. If they came out transparent, varied or translucent, nothing is done.</li>
+<li>A pixel close to that color is cleared when it was empty in your layer or was changed by the filter. Pixels the filter left as they were, such as a black pupil in your artwork, stay.</li>
+<li>Clearing is soft: pixels fade from transparent near the fill color to opaque further away, and the fill is taken back out of the colors, so edges stay clean without dark halos. This also covers noisy fills such as brush-stroke textures.</li>
+<li>When a filter adds a border around the layer (frames), the added border counts as empty too, so a fill there is cleared, but the shapes the filter draws (like a white frame line) stay.</li></ul>
+Leave it off when you want the fill itself, for example a render filter on a sparsely painted layer. A completely empty layer is never touched.</li>
+
+</ul>
+
+<h2>If something goes wrong</h2>
+<p>Errors appear under the preview and are also written to a log file (<em>Settings &gt; Log file</em> shows where, with a button to open the folder). Include its last lines when reporting a problem.</p>
+
+<h2>Limits</h2>
+<ul>
+<li>Paint layers in RGB(A), 8-bit or 16-bit integer. Convert other layers first.</li>
+<li>Filters see the whole canvas (limited to the selection if there is one), like Krita's own G'MIC. A filter that changes the image size (frames, borders, crops) cannot replace the layer, so its result is added as a new layer, centered on the original; selection blending is skipped for such filters.</li>
+<li>Filters that need the internet, a second layer, or a newer gmic than the one installed report an error instead of running.</li>
+</ul>
+</body></html>

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=gmic_studio
+X-Python-2-Compatible=false
+X-Krita-Manual=Manual.html
+Name=G'MIC Studio
+Comment=A docker for G'MIC filters with live preview, favorites, presets and non-blocking apply.
