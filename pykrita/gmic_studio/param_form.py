@@ -26,6 +26,9 @@ def _slider_window(p):
     return (p.minimum, max(top, p.default))
 
 
+PAD = 8                    # left/right padding of the parameter rows, px
+
+
 class SliderSpin(W.QWidget):
     """Slider + number box pair, like Krita's own slider-spin boxes."""
     valueChanged = pyqtSignal()
@@ -225,7 +228,7 @@ class ParamForm(W.QWidget):
     def __init__(self):
         super().__init__()
         self._form = W.QFormLayout(self)
-        self._form.setContentsMargins(0, 0, 0, 0)
+        self._form.setContentsMargins(PAD, 0, PAD, 0)          # room at both sides, so nothing touches the scroll bar or the edge
         self._form.setRowWrapPolicy(enum(W.QFormLayout, "RowWrapPolicy", "WrapAllRows"))   # label above: sliders get the full width
         self._fdef = None
         self._editors = {}   # param index -> (getter, setter)
