@@ -7,6 +7,8 @@ from .core import getgmic, install, log
 
 W = QtWidgets
 DOWNLOAD_URL = "https://gmic.eu/download.html"
+WHY = ("Why a separate gmic? Krita's built-in G'MIC is a plugin library that only Krita itself can run: other plugins "
+       "cannot give it commands or read its previews. This plugin runs the standalone `gmic` program instead.")
 
 
 class SettingsDialog(W.QDialog):
@@ -265,13 +267,14 @@ class GetGmicDialog(W.QDialog):
         row.addStretch(1)
         row.addWidget(close)
         if getgmic.can_download():
-            self.msg.setText("Downloads the official command-line build from gmic.eu (about 15 MB) and keeps "
-                             "it in this plugin's private folder. Nothing else is installed on your system.")
+            self.msg.setText(WHY + "\n\nDownloads the official command-line build (about 15 MB) from " + getgmic.PAGE_URL +
+                             " (the exact file is picked when you click) and keeps it in this plugin's private folder. "
+                             "Nothing else is installed on your system, and nothing is downloaded before you click.")
             self.action.setText("Download from gmic.eu")
             self.action.clicked.connect(self._download)
         else:
             text, cmd = getgmic.install_command()
-            self.msg.setText(text + ("\n\n" + cmd if cmd else "") +
+            self.msg.setText(WHY + "\n\n" + text + ("\n\n" + cmd if cmd else "") +
                              "\n\nThen close this dialog; the plugin finds gmic on your PATH.")
             self.msg.setTextInteractionFlags(enum(QtCore.Qt, "TextInteractionFlag", "TextSelectableByMouse"))
             if cmd:

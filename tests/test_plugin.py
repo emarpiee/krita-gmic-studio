@@ -2187,3 +2187,13 @@ def test_everyday_options_are_on_the_docker_not_in_the_menu(app, studio):
     assert d.crop_btn.isVisible() and abs(y(d.crop_btn) - y(d.live)) < 6
     d.crop_btn.click()
     assert studio.settings.get("keep_size") is True and d.keep_size.isChecked()
+
+
+def test_get_gmic_dialog_explains_why_and_where_a_download_comes_from(app, studio):
+    from gmic_studio.settings_dialog import GetGmicDialog
+    from gmic_studio.core import getgmic
+    dlg = GetGmicDialog(studio)
+    text = dlg.msg.text()
+    assert "Why a separate gmic?" in text and "only Krita itself can run" in text
+    if getgmic.can_download():
+        assert getgmic.PAGE_URL in text and "before you click" in text
