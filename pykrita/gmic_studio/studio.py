@@ -13,6 +13,8 @@ from .core.settings import Settings
 
 _instance = None
 SIZE_TOLERANCE = 2        # px a filter may round the output size by before it counts as a resize
+# While a handle or slider is held, up to this many small previews render at once (each costs a gmic start-up).
+FAST_PARALLEL = 2 if (os.cpu_count() or 1) >= 2 else 1
 FAST_SIDE = 512           # longest side of the smaller preview used for filters that proved slow
 THUMB_SIDE = 800          # longest side of a whole-image thumbnail preview
 
@@ -73,7 +75,9 @@ class Studio(QtCore.QObject):
         self.exe_version = ""
         self._threads = set()
         self._preview_token = 0
-        self._preview_runner = None
+        self._runs = {}                              # token -> (runner, interactive) for every preview in flight
+        self._valid_from = 0                         # interactive results older than this were cancelled
+        self._shown_token = 0                        # newest preview already shown (an older one arriving later is dropped)
         self.last_result_resized = False             # the last preview's result had another size than the original (before any crop)
         self._pending_preview = None                 # newest request that arrived while an interactive one was rendering
         self._apply_runner = None
@@ -285,10 +289,16 @@ class Studio(QtCore.QObject):
     def _request_preview(self, fdef, values, force_full=False, interactive=False):
         if not self.exe or fdef is None:
             return
-        if interactive and self._preview_runner is not None:
-            self._pending_preview = (fdef, dict(values))
-            return
-        self.cancel_preview()
+        if interactive:
+            if len(self._runs) >= FAST_PARALLEL:
+                self._pending_preview = (fdef, dict(values))          # newest wins; it starts when one of them is done
+                return
+            for token, (runner, fast) in list(self._runs.items()):    # a full-quality render makes no sense while scrubbing
+                if not fast:
+                    runner.cancel()
+                    del self._runs[token]
+        else:
+            self.cancel_preview()
         try:
             snap, w, h, data, mask, kind = self._plan_preview(fdef, force_full, fast=interactive)
             job = self._make_job(fdef, values, w, h, data, 8, mask, preview=True)
@@ -299,17 +309,22 @@ class Studio(QtCore.QObject):
         self._preview_token += 1
         token = self._preview_token
         runner = engine.Runner(self.exe, job, timeout=120)
-        self._preview_runner = runner
+        self._runs[token] = (runner, interactive)
         before = qimage_from_rgba8(job.data, w, h)
         self.status.emit("Previewing (%s)..." % kind, False)
         started = time.time()
 
         def done(result, error):
             try:
-                if token != self._preview_token:
-                    return                              # superseded by a newer request: another one is running
-                self._preview_runner = None
-                self.previewBusy.emit(False)
+                self._runs.pop(token, None)
+                current = (token >= self._valid_from and token > self._shown_token) if interactive else token == self._preview_token
+                if not current:
+                    if not self._runs:
+                        self.previewBusy.emit(False)
+                    return                              # superseded by a newer request, or cancelled
+                self._shown_token = max(self._shown_token, token)
+                if not self._runs:
+                    self.previewBusy.emit(False)
                 if isinstance(error, engine.Cancelled):
                     return
                 if error is not None and using_preview_cmd:
@@ -347,7 +362,7 @@ class Studio(QtCore.QObject):
                 if result:
                     shutil.rmtree(result[4], ignore_errors=True)      # also for stale or failed results
                 pending, self._pending_preview = self._pending_preview, None
-                if pending is not None and self._preview_runner is None:
+                if pending is not None and len(self._runs) < FAST_PARALLEL:
                     self.request_preview(pending[0], pending[1], interactive=True)
 
         self.previewBusy.emit(True)
@@ -379,10 +394,12 @@ class Studio(QtCore.QObject):
 
     def cancel_preview(self):
         self._preview_token += 1
+        self._valid_from = self._preview_token + 1
         self._pending_preview = None
-        if self._preview_runner is not None:
-            self._preview_runner.cancel()
-            self._preview_runner = None
+        if self._runs:
+            for runner, _fast in self._runs.values():
+                runner.cancel()
+            self._runs.clear()
             self.previewBusy.emit(False)
 
     def _keep_size(self, img, width, height):

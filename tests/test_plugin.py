@@ -1947,18 +1947,48 @@ def test_dragging_a_handle_renders_without_waiting_and_ends_with_a_full_render(a
     assert calls == [True, False]                                             # let go: one full-quality render
 
 
-def test_interactive_previews_keep_only_the_newest_request_while_one_renders(app, studio):
+def test_interactive_previews_keep_only_the_newest_request_while_the_slots_are_busy(app, studio, monkeypatch):
+    import gmic_studio.studio as st
     ready(app, studio)
-    class Busy:
-        def cancel(self):
-            pass
-    studio._preview_runner = Busy()                                           # a render is in progress
+    use_doc(krita.Node("L", 20, 10))
+    monkeypatch.setattr(st, "FAST_PARALLEL", 2)
+    started = []
+    studio._spawn = lambda fn, done: started.append(done)
+    f = studio.index.get("Basics > Blur")
+    for n in (1, 2, 3, 4):
+        studio.request_preview(f, {"0": n}, interactive=True)
+    assert len(started) == 2 and len(studio._runs) == 2                      # two small renders at once
+    assert studio._pending_preview[1] == {"0": 4}                             # of the rest, only the newest waits
+    studio.cancel_preview()
+    assert studio._pending_preview is None and not studio._runs
+
+
+def test_an_older_small_preview_finishing_late_never_replaces_a_newer_one(app, studio, monkeypatch, tmp_path):
+    import gmic_studio.studio as st
+    from gmic_studio.core import pngio
+    ready(app, studio)
+    use_doc(krita.Node("L", 20, 10))
+    monkeypatch.setattr(st, "FAST_PARALLEL", 2)
+    started = []
+    studio._spawn = lambda fn, done: started.append(done)
+    shown = []
+    studio.previewReady.connect(lambda b, a: shown.append(a.pixelColor(0, 0).red()))
     f = studio.index.get("Basics > Blur")
     studio.request_preview(f, {"0": 1}, interactive=True)
     studio.request_preview(f, {"0": 2}, interactive=True)
-    assert studio._pending_preview[1] == {"0": 2} and studio._preview_runner is not None
-    studio.cancel_preview()
-    assert studio._pending_preview is None
+    w, h = bridge.region_size()
+
+    def result(red):
+        folder = tmp_path / ("r%d" % red)
+        folder.mkdir()
+        pngio.write(str(folder / "out.png"), w, h, bytes([red, 0, 0, 255]) * (w * h), pngio.RGBA, 8)
+        return (w, h, 8, str(folder / "out.png"), str(folder))
+
+    started[1](result(200), None)                                             # the newer one finishes first
+    started[0](result(100), None)                                             # the older one arrives late
+    assert shown == [200]
+    studio.request_preview(f, {"0": 3}, interactive=False)                    # a full render drops anything in flight
+    assert len(studio._runs) == 1
 
 
 def test_preview_view_keeps_the_view_when_the_same_picture_changes_resolution(app):

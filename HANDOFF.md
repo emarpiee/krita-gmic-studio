@@ -42,7 +42,8 @@ Works on Krita 5 (PyQt5) and Krita 6 (PyQt6). Offline.
 - Apply includes a button whose press the shown preview was made with (`ParamForm.apply_values`).
 - Filters whose own preview draws a before/after split (e.g. Upscale [CNN2x]) get a draggable divider: the job redefines gmic's `gui_split_preview`
   (copied from the update file, `engine.split_override`) so the position can be passed in; release = new preview.
-- Holding a slider handle previews like dragging a point handle: small fast image, newest request wins, full render on release (`ParamForm.scrubbing`).
+- Holding a slider handle previews like dragging a point handle: small fast image, newest request wins, full render on release (`ParamForm.scrubbing`). Up to `FAST_PARALLEL` (2) small renders run at once while scrubbing (gmic start-up, ~0.12 s, is the floor per render);
+  results older than the one on screen are dropped (`Studio._runs`, `_shown_token`).
 - Duplicate preview modes: draggable divider, and they accept a result of another size (gmic resizes both).
 - Empty folder parameter is sent as `.` (gmic cannot take an empty argument at all). Timeouts and empty-field errors now explain themselves.
 
