@@ -115,9 +115,11 @@ So this plugin runs the normal `gmic` program in the background. Krita's current
 pip install pytest PyQt6      # for Qt 5: install PyQt5 and set GMIC_TEST_QT=5
 python -m pytest tests        # run without a display (no DISPLAY variable)
 python tools/smoke_gmic.py    # needs a real gmic; checks what the fake gmic cannot
+python tools/run_tests.py     # the same, one small step at a time at low priority (gentle on slow computers)
 ```
 
 - `tools/catalogue_check.py` runs every filter with its default values through the real `gmic`. This takes a long time and a lot of CPU. On a slow computer, use `--jobs 1` and `--every N` or `--limit N`.
+- `tools/release.sh v1.2.3` runs `run_tests.py`, builds the zip, then tags and pushes. The tag starts the GitHub release workflow.
 - Do not import `tests/test_plugin.py` from another test file (it hangs). Add new tests directly to it.
 
 ## About this project

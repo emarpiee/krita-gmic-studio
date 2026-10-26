@@ -66,8 +66,10 @@ def wait(app, cond, timeout=15):
 
 
 def ready(app, s):
+    loaded = []                                        # wait for this refresh itself: a late one would replace a test's own index
+    s.indexChanged.connect(lambda: loaded.append(1))
     s.refresh()
-    wait(app, lambda: s.exe and len(s.index.filters) > 0)
+    wait(app, lambda: loaded and s.exe and len(s.index.filters) > 0)
     assert s.exe_version == "3.9.9"
 
 
@@ -540,12 +542,16 @@ def _list_names(d):
     return [d.plist.item(i).text() for i in range(d.plist.count())]
 
 
-def _make_docker(app, studio, doc=True):
+def _make_docker(app, studio, doc=True, index=None):
     ready(app, studio)
     if doc:
         use_doc(krita.Node("L", 12, 12))
     from gmic_studio.docker import StudioDocker
-    return StudioDocker()
+    d = StudioDocker()
+    if index is not None:                              # after ready(), whose refresh loads the real filter list
+        studio.index = index
+        studio.indexChanged.emit()
+    return d
 
 
 def test_original_layout_preview_is_below_the_lists(app, studio):
@@ -923,8 +929,7 @@ def test_filter_list_keeps_open_groups_scroll_and_selection_across_refreshes(app
     from gmic_studio.core import filters
     fs = [filters.FilterDef(("Cat %02d" % c,), "Filter %02d-%02d" % (c, n), "blur") for c in range(12) for n in range(8)]
     ready(app, studio)
-    studio.index = filters.FilterIndex(fs)
-    d = _make_docker(app, studio, doc=False)
+    d = _make_docker(app, studio, doc=False, index=filters.FilterIndex(fs))
     d.resize(380, 520)
     d.show()
     app.processEvents()
@@ -961,8 +966,7 @@ def test_filter_list_keeps_open_groups_scroll_and_selection_across_refreshes(app
 def test_searching_and_clearing_restores_the_open_groups(app, studio):
     from gmic_studio.core import filters
     ready(app, studio)
-    studio.index = filters.FilterIndex([filters.FilterDef(("Cat %d" % c,), "F%d%d" % (c, n), "blur") for c in range(4) for n in range(3)])
-    d = _make_docker(app, studio, doc=False)
+    d = _make_docker(app, studio, doc=False, index=filters.FilterIndex([filters.FilterDef(("Cat %d" % c,), "F%d%d" % (c, n), "blur") for c in range(4) for n in range(3)]))
     d.show()
     d.tree.topLevelItem(d.tree.topLevelItemCount() - 1).setExpanded(True)
     last = d.tree.topLevelItem(d.tree.topLevelItemCount() - 1).text(0)
@@ -977,9 +981,8 @@ def test_searching_and_clearing_restores_the_open_groups(app, studio):
 def test_tree_has_no_recent_group_and_the_recent_button_lists_them(app, studio):
     from gmic_studio.core import filters
     ready(app, studio)
-    studio.index = filters.FilterIndex([filters.FilterDef(("Cat %d" % c,), "F%d%d" % (c, n), "blur") for c in range(3) for n in range(3)])
     studio.settings.set("recents", ["Cat 2 > F21", "Cat 0 > F00", "Gone > Missing"])
-    d = _make_docker(app, studio, doc=False)
+    d = _make_docker(app, studio, doc=False, index=filters.FilterIndex([filters.FilterDef(("Cat %d" % c,), "F%d%d" % (c, n), "blur") for c in range(3) for n in range(3)]))
     assert [d.tree.topLevelItem(i).text(0) for i in range(d.tree.topLevelItemCount())] == ["Cat 0", "Cat 1", "Cat 2"]
     assert d.recent.isEnabled() and d.recent.labels() == ["F21  ·  Cat 2", "F00  ·  Cat 0"]     # newest first, unknown skipped
     assert [a.text() for a in d.recent.menu().actions() if a.text()] == d.recent.labels() + ["Clear recent filters"]
@@ -991,9 +994,8 @@ def test_tree_has_no_recent_group_and_the_recent_button_lists_them(app, studio):
 def test_choosing_a_recent_filter_opens_it_in_place_and_loads_it(app, studio):
     from gmic_studio.core import filters
     ready(app, studio)
-    studio.index = filters.FilterIndex([filters.FilterDef(("Cat %d" % c,), "F%d%d" % (c, n), "blur", []) for c in range(3) for n in range(3)])
     studio.settings.set("recents", ["Cat 2 > F21"])
-    d = _make_docker(app, studio, doc=False)
+    d = _make_docker(app, studio, doc=False, index=filters.FilterIndex([filters.FilterDef(("Cat %d" % c,), "F%d%d" % (c, n), "blur", []) for c in range(3) for n in range(3)]))
     d.tabs.setCurrentIndex(PRESETS)
     d.search.setText("zzz")                                            # something typed: choosing a recent clears it
     d.recent.menu().actions()[0].trigger()                             # what clicking the menu entry does
