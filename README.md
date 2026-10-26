@@ -1,75 +1,118 @@
-# G'MIC Studio (Krita plugin)
+# G'MIC Studio
 
-A docker-based, non-blocking alternative to Krita's modal G'MIC-Qt dialog. Pure Python (PyQt5 for Krita 5, PyQt6 for Krita 6, same code), written to run on Windows, macOS and Linux from one zip. Works offline.
+A Krita plugin that gives you G'MIC filters in a docker panel, with a live preview.
 
-**Tested only on Linux** (Krita 6, gmic 3.7.4). The Windows and macOS code paths (config folders, finding and downloading gmic, console windows) are written but have never been run: expect rough edges there, and run `python tools/smoke_gmic.py` first to check your gmic.
+> **Note:** I made this for my own use. It may not be maintained in the long run. See [About this project](#about-this-project).
 
-It runs the standalone `gmic` program in a background process and reads the filter catalogue from G'MIC itself, so Krita stays usable while you tune a filter.
+Krita's built-in G'MIC window blocks Krita while it is open. G'MIC Studio is a docker instead, so you can keep working in Krita while you try a filter. It works offline.
+
+## Status
+
+- **Tested on Linux only** (Krita 6, gmic 3.7.4).
+- **Windows and macOS have never been tested.** The code is written for them, but expect problems. If you try it there, run `python tools/smoke_gmic.py` first. It checks that your `gmic` works.
+- The code supports Krita 5 (PyQt5) and Krita 6 (PyQt6). Krita 5 has not been tried recently.
 
 ## Features
 
 **Preview**
-- Live preview, debounced, with stale renders cancelled. Up to about 3 MP it runs the exact Apply job on the whole image, so the preview matches the result. Larger images follow each filter's declared preview zoom, as G'MIC-Qt does.
-- Holding a slider or a point handle renders small, fast previews (two at a time, newest result wins) and one full render on release.
-- The preview follows layer, selection and pixel changes by itself. Zoom with the wheel, pan by dragging, double-click for fit / 100%, checkerboard for transparency, hold-to-compare.
-- G'MIC-Qt's 13 preview modes (split, checkered, duplicate), with a draggable divider. Filters that draw their own before/after view (for example Upscale [CNN2x]) get a draggable divider too.
-- Draggable point handles that update the preview in real time.
+- The preview updates while you change a setting (live preview).
+- For images up to about 3 megapixels, the preview is the exact same job as Apply, on the whole image. For bigger images, it follows each filter's own preview setting, like G'MIC-Qt.
+- When you hold a slider or a point handle, the preview shows small, fast images. When you let go, it makes one full-quality image.
+- Zoom with the mouse wheel, move the picture by dragging, double-click for "fit" or 100%. A checkerboard shows transparent areas. Hold "Compare" to see the original.
+- 13 preview modes from G'MIC-Qt (split, checkered, duplicate). Every split has a divider you can drag. Filters that draw their own before/after view, like Upscale [CNN2x], also get a draggable divider.
+- Point parameters appear as handles on the preview. Drag them to move the point.
 
 **Parameters**
-- Button parameters (one-shot), G'MIC's hidden / grayed-out markers, and values a filter reports back (a handle it moved, a hidden value) are all handled.
-- Random filters share one seed between preview and Apply ("New random seed" re-rolls). Randomize with per-parameter locks.
-- Out-of-range defaults are pulled into range, like G'MIC-Qt does.
+- Supports button parameters, hidden and grayed-out parameters, and values that a filter sends back (for example, a point the filter moved).
+- Random filters use the same random seed in the preview and in Apply. Use the dice button to get a new seed.
+- "Randomize" can lock the parameters you want to keep.
 
-**Organising**
-- Search with a Recent button, Favorites, and the category tree keeps its open folders and scroll position.
-- Presets form one library: every preset of every filter in a flat list, click to preview, double-click to apply, optional saved random seed, export/import. Presets can also be stored inside the Krita document (an annotation saved in the .kra), with explicit copy between the two.
-- Each filter remembers its last values. "Repeat last filter" action.
+**Organizing**
+- Search box, a "Recent" list, Favorites, and a category tree that remembers which folders are open.
+- Presets are in one list for all filters. Click a preset to preview it, double-click to apply it. You can export and import presets. You can also save presets inside the Krita document.
+- Each filter remembers its last values. There is a "Repeat last filter" action.
 
 **Applying**
-- Three undoable apply modes: new layer, new layer + hide original, replace original (Krita cannot record plugin pixel edits for undo, but it does record layers and visibility). If Krita refuses to remove the original in replace mode, the original is hidden instead and the status line says so.
-- Respects selections (including feathered edges), 8/16-bit integer RGBA, and passes transparency to filters as Krita does (RGBA), with an automatic RGB-only retry for filters that refuse an alpha channel.
-- "Force transparent background" (off by default): one general rule detects the fill a filter paints over empty areas and clears it softly, keeping content the filter did not change.
-- Filters that change the image size: the preview shows a dashed frame over the original, and a **Crop** toggle ("Keep the original size") cuts a bigger result to the original size around its center, or pads a smaller one. With Crop off, the result keeps its full size as a larger layer.
+- Three apply modes, all undoable with Ctrl+Z:
+  - *New layer*: the result goes on a new layer above.
+  - *New layer, hide original*: same, and the original layer is hidden.
+  - *Replace original*: the result takes the place of the original layer.
+- Works with selections (also soft edges) and with 8-bit and 16-bit RGBA layers.
+- "Force transparent background" (off by default) removes the background color that some filters paint over empty areas.
+- Some filters change the image size. The preview then shows a dashed frame for the original size. The **Crop** button ("Keep the original size") cuts a bigger result to the original size, around the center. A smaller result is padded. If Crop is off, the result keeps its full size as a larger layer.
+
+## Requirements
+
+- Krita 5 or 6 with Python plugins enabled.
+- The standalone `gmic` program. See [Why a separate gmic?](#why-a-separate-gmic) below.
 
 ## Install
 
-1. `python3 tools/build_zip.py` creates `dist/gmic_studio.zip`.
-2. In Krita: *Tools > Scripts > Import Python Plugin from File*, pick the zip, enable it in the Python Plugin Manager, restart.
-3. *Settings > Dockers > G'MIC Studio*.
-4. Running filters needs the standalone `gmic` program. Krita's bundled G'MIC cannot be used instead: it ships only as a plugin library (`krita_gmic_qt.so`, G'MIC built in, no command-line binary), and its one interface, `KisQmicPluginInterface::launch(image, headless)`, is a C++ class loaded by Krita itself. The `headless` flag only means "re-apply the last filter"; there is no way to pass a command, get a preview back or read an error. See Krita's [`ext_gmic`](https://github.com/KDE/krita/tree/master/3rdparty_plugins/ext_gmic) and [`plugins/extensions/qmic`](https://github.com/KDE/krita/tree/master/plugins/extensions/qmic). *Settings > Get gmic...* explains this, shows where a download would come from, downloads the official build on Windows (only when you click) and shows the package-manager command on Linux/macOS. Krita's current sources build G'MIC 3.7.4.1; a recent gmic is what the filter list needs.
+1. Build the plugin file: `python3 tools/build_zip.py`. This creates `dist/gmic_studio.zip`.
+2. In Krita, go to *Tools > Scripts > Import Python Plugin from File* and choose the zip.
+3. Enable "G'MIC Studio" in the Python Plugin Manager and restart Krita.
+4. Open the docker: *Settings > Dockers > G'MIC Studio*.
+5. If the docker says "gmic not found", click the gear button, then *Get gmic...*.
+   - **Windows:** the plugin can download the official build for you, but only when you click the button.
+   - **Linux and macOS:** it shows the install command for your system (for example `sudo dnf install gmic` or `brew install gmic`).
 
-**Filter list.** It is read from G'MIC's own `update*.gmic` file or from Krita's G'MIC-Qt cache (`~/.config/gmic/gmic_qt_filters.dat`; open G'MIC-Qt once to create it), whichever is newer. A cache older than gmic's definitions would have parameter lists that no longer fit the commands. *Settings > Update filter list* fetches the latest definitions (the only network use, and only when you ask).
+## How to use
 
-## Layout
+1. Open an image and select a paint layer. If you want, make a selection.
+2. Type in the search box, or open a category, and click a filter.
+3. Change the parameters. With "Live" checked, the preview updates by itself. Use the refresh button to update it by hand.
+4. Choose what Apply does in the box next to the Apply button (new layer, hide original, or replace original).
+5. Click **Apply**. Use **Stop** to cancel a filter that is still running.
 
-| Path | Role |
-|---|---|
-| `pykrita/gmic_studio.desktop` | Krita plugin descriptor |
-| `pykrita/gmic_studio/core/` | Qt-free logic: gmic engine, `#@gui` parser, settings, presets, PNG I/O |
-| `pykrita/gmic_studio/krita_bridge.py` | The only module that reads/writes Krita layers |
-| `pykrita/gmic_studio/studio.py` | Controller: threads, previews, apply |
-| `pykrita/gmic_studio/docker.py`, `param_form.py`, `preview_view.py`, `settings_dialog.py` | UI |
-| `tests/` | pytest suite using a stub `krita` module and a fake `gmic` (many tests also use a real gmic when installed) |
-| `tools/` | `build_zip.py`, `smoke_gmic.py`, `catalogue_check.py` |
-| `HANDOFF.md`, `CLAUDE.md` | Current state and working notes for development sessions |
+The filter list comes from G'MIC's own `update*.gmic` file or from Krita's G'MIC-Qt cache (`~/.config/gmic/gmic_qt_filters.dat`), whichever is newer. *Settings > Update filter list* downloads the newest definitions. This is the only time the plugin uses the internet, and only when you ask.
 
-## Testing
+## Why a separate gmic?
 
-```
-pip install pytest PyQt6      # or PyQt5 with GMIC_TEST_QT=5
-python -m pytest tests        # run with no DISPLAY
-python tools/smoke_gmic.py    # needs a real gmic; validates the assumptions the fake cannot
-```
+Krita's own G'MIC cannot be used by other plugins:
 
-`tools/catalogue_check.py` runs every filter with default values through the real gmic. It takes a long time and a lot of CPU: use `--jobs 1`, `--every N` or `--limit N` on a slow machine.
+- Krita includes G'MIC only as a plugin library (`krita_gmic_qt.so`). It has no `gmic` command-line program.
+- The only way to start it is a C++ interface (`KisQmicPluginInterface::launch(image, headless)`) that only Krita can call. The `headless` option only means "repeat the last filter". There is no way to send your own command, get a preview back, or read an error message.
 
-Do not import `tests/test_plugin.py` from a second test file (it hangs); add tests to it directly.
+So this plugin runs the normal `gmic` program in the background. Krita's current source code builds G'MIC 3.7.4.1, and a recent `gmic` works fine. More details: Krita's [`ext_gmic`](https://github.com/KDE/krita/tree/master/3rdparty_plugins/ext_gmic) and [`plugins/extensions/qmic`](https://github.com/KDE/krita/tree/master/plugins/extensions/qmic).
 
 ## Known limits
 
-- Paint layers only; RGB(A) 8/16-bit integer only (F16/F32, CMYK, Lab and gray are refused with a message).
-- Filters that need a plot window, a second layer or the internet do not work: they time out or fail with an explanatory message (for example Equation Plot [Parametric], Download External Data).
-- gmic cannot take an empty argument, so an empty folder parameter is sent as `.`; empty text or file fields make some filters fail.
-- Duplicate preview modes and filter-drawn splits need gmic to render the layout, so they update on release rather than while dragging.
-- Each preview starts a gmic process (about 0.1 s of start-up on a fast machine), which limits how smooth live scrubbing can be.
-- Tested against gmic 3.7.4 and PyQt6 on Linux only. Windows and macOS are untested, and the PyQt5 path is covered by the test suite but has not been run against a real Krita 5 recently.
+- Only paint layers. Only RGB(A) with 8-bit or 16-bit integer values. Other layer types and color spaces show a message.
+- Some filters cannot work. They need a plot window, a second layer, or the internet (for example *Equation Plot [Parametric]* and *Download External Data*). They time out or show an error message.
+- `gmic` cannot receive an empty value. An empty folder field is sent as `.` (the current folder). Some filters with an empty text or file field fail.
+- Duplicate preview modes, and splits drawn by a filter, update when you let go of the divider, not while you drag.
+- Every preview starts a new `gmic` process. This takes about 0.1 seconds on a fast computer, so live previews can look a little choppy.
+
+## For developers
+
+**Folders**
+
+| Path | What it does |
+|---|---|
+| `pykrita/gmic_studio.desktop` | Krita plugin description |
+| `pykrita/gmic_studio/core/` | Logic without Qt: gmic engine, filter definition parser, settings, presets, PNG files |
+| `pykrita/gmic_studio/krita_bridge.py` | The only file that reads and writes Krita layers |
+| `pykrita/gmic_studio/studio.py` | Controller: background jobs, previews, apply |
+| `pykrita/gmic_studio/docker.py`, `param_form.py`, `preview_view.py`, `settings_dialog.py` | User interface |
+| `tests/` | Tests, using a fake `krita` module and a fake `gmic` (many tests also use a real `gmic` if installed) |
+| `tools/` | `build_zip.py`, `smoke_gmic.py`, `catalogue_check.py` |
+| `HANDOFF.md`, `CLAUDE.md` | Current state and working notes for development sessions |
+
+**Tests**
+
+```
+pip install pytest PyQt6      # for Qt 5: install PyQt5 and set GMIC_TEST_QT=5
+python -m pytest tests        # run without a display (no DISPLAY variable)
+python tools/smoke_gmic.py    # needs a real gmic; checks what the fake gmic cannot
+```
+
+- `tools/catalogue_check.py` runs every filter with its default values through the real `gmic`. This takes a long time and a lot of CPU. On a slow computer, use `--jobs 1` and `--every N` or `--limit N`.
+- Do not import `tests/test_plugin.py` from another test file (it hangs). Add new tests directly to it.
+
+## About this project
+
+I made this for my own use. Krita's built-in G'MIC window is not very intuitive, and I wanted something easier for me to work with, so this started as an accessibility tool for my personal projects. It may not be maintained in the long run.
+
+It was built with the help of Claude Sonnet 5.5.
+
+**A note on AI.** I am against AI-generated images. I am fine with AI-assisted tools that help an artist's workflow. AI is not meant to replace me as an artist. I use it to help me make tools that lessen the work of an artist, without ever touching the actual art. This plugin only runs G'MIC filters that you choose, on art that you made.
