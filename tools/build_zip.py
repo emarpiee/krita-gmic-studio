@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build dist/gmic_studio.zip, installable via Tools > Scripts > Import Python Plugin from File."""
+"""Build dist/krita-gmic_studio-plugin.zip, installable via Tools > Scripts > Import Python Plugin from File."""
 import os
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "pykrita")
-OUT = os.path.join(ROOT, "dist", "gmic_studio.zip")
+OUT = os.path.join(ROOT, "dist", "krita-gmic_studio-plugin.zip")
 
 
 def main():

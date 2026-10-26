@@ -48,7 +48,7 @@ Krita's built-in G'MIC window blocks Krita while it is open. G'MIC Studio is a d
 
 ## Install
 
-1. Build the plugin file: `python3 tools/build_zip.py`. This creates `dist/gmic_studio.zip`.
+1. Build the plugin file: `python3 tools/build_zip.py`. This creates `dist/krita-gmic_studio-plugin.zip`.
 2. In Krita, go to *Tools > Scripts > Import Python Plugin from File* and choose the zip.
 3. Enable "G'MIC Studio" in the Python Plugin Manager and restart Krita.
 4. Open the docker: *Settings > Dockers > G'MIC Studio*.
@@ -96,7 +96,6 @@ So this plugin runs the normal `gmic` program in the background. Krita's current
 | `pykrita/gmic_studio/docker.py`, `param_form.py`, `preview_view.py`, `settings_dialog.py` | User interface |
 | `tests/` | Tests, using a fake `krita` module and a fake `gmic` (many tests also use a real `gmic` if installed) |
 | `tools/` | `build_zip.py`, `smoke_gmic.py`, `catalogue_check.py` |
-| `HANDOFF.md`, `CLAUDE.md` | Current state and working notes for development sessions |
 
 **Tests**
 
