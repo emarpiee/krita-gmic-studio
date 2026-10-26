@@ -227,6 +227,10 @@ class ParamForm(W.QWidget):
         self._locks = {}     # filter id -> set of locked parameter indices (text)
         self._labels = {}    # param index -> LockLabel
         self._pressed = set()   # button parameters pressed for the next run only
+        self._silent = False    # setting values from a filter's report: no new preview
+        self._hidden = {}       # hidden `value` parameters: they start at their default, a filter may report new ones
+        self._shown = set()     # buttons behind the preview now on screen; Apply repeats them until a value changes
+        self.changed.connect(lambda: self._shown.clear())
 
     @property
     def locked(self):
@@ -281,6 +285,8 @@ class ParamForm(W.QWidget):
         self._editors = {}
         self._labels = {}
         self._pressed = set()
+        self._shown = set()
+        self._hidden = {}
         self._fdef = None
 
     def set_filter(self, fdef, values=None):
@@ -313,7 +319,16 @@ class ParamForm(W.QWidget):
         return out
 
     def release_buttons(self):
+        """A run started with the pressed buttons: they are spent, but what it produced still counts for Apply."""
+        self._shown = set(self._pressed)
         self._pressed.clear()
+
+    def apply_values(self):
+        """Values for Apply: what the preview on screen was made from, including a button it was made with."""
+        out = self.values()
+        for i in self._pressed | self._shown:
+            out[str(i)] = 1
+        return out
 
     def set_values(self, values):
         if self._fdef is None:
@@ -322,6 +337,31 @@ class ParamForm(W.QWidget):
             p = self._fdef.params[i]
             setter(p.coerce(values.get(str(i), p.default)))
         self.changed.emit()
+
+    def apply_status(self, status, sent):
+        """Take over the values a filter reported (its status string, one `{...}` per value parameter).
+
+        Only what the filter changed from what it was sent, and only where the form still holds what was sent
+        (a newer edit wins). Nothing is run again: the picture already shows these values. True if anything moved."""
+        if self._fdef is None:
+            return False
+        slots = [i for i, p in enumerate(self._fdef.params) if p.has_value]
+        moved = False
+        self._silent = True
+        try:
+            for i, text in zip(slots, engine_groups(status)):
+                p = self._fdef.params[i]
+                if text == "" or p.kind == "button" or i not in self._editors:
+                    continue
+                new, old = _from_report(p, text), p.coerce(sent.get(str(i), p.default))
+                get, set_ = self._editors[i]
+                if new is None or p.coerce(new) == old or get() != old:
+                    continue
+                set_(p.coerce(new))
+                moved = True
+        finally:
+            self._silent = False
+        return moved
 
     def _press(self, index):
         self._pressed.add(index)
@@ -334,8 +374,12 @@ class ParamForm(W.QWidget):
     # -- row construction ------------------------------------------------
     def _register(self, i, widget, get, set_, signal):
         self._editors[i] = (get, set_)
-        signal.connect(self.changed)
+        signal.connect(self._edited)
         return widget
+
+    def _edited(self, *_):
+        if not self._silent:
+            self.changed.emit()
 
     def _add_row(self, i, p):
         k, f = p.kind, self._form
@@ -390,4 +434,31 @@ class ParamForm(W.QWidget):
             self._editors[i] = (lambda: 0, lambda _v: None)
             f.addRow(btn)
         else:                                    # value / hidden: nothing to edit
-            self._editors[i] = (lambda d=p.default: d, lambda _v: None)
+            self._hidden[i] = p.default
+            self._editors[i] = (lambda i=i: self._hidden[i], lambda v, i=i: self._hidden.__setitem__(i, v))
+
+
+def engine_groups(status):
+    from .core import engine
+    return engine.split_groups(status)
+
+
+def _from_report(p, text):
+    """A parameter value from the text of one reported group, or None when it cannot be read."""
+    try:
+        if p.kind == "int":
+            return int(round(float(text)))
+        if p.kind == "float":
+            return float(text)
+        if p.kind == "bool":
+            return text.strip().lower() in ("1", "true")
+        if p.kind == "choice":
+            return int(float(text))
+        if p.kind == "color":
+            return [int(float(t)) for t in text.split(",")]
+        if p.kind == "point":
+            x, y = (float(t) for t in text.split(",")[:2])
+            return [x, y]
+    except ValueError:
+        return None
+    return text

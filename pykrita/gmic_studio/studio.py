@@ -58,6 +58,7 @@ class Studio(QtCore.QObject):
     indexChanged = pyqtSignal()
     busyChanged = pyqtSignal(bool)
     status = pyqtSignal(str, bool)                 # message, is_error
+    reported = pyqtSignal(str, str, object)        # filter id, status string a preview reported, the values it was sent
     previewReady = pyqtSignal(object, object)      # before QImage, after QImage
     presetsChanged = pyqtSignal()
     previewBusy = pyqtSignal(bool)                 # a preview is being rendered
@@ -78,6 +79,8 @@ class Studio(QtCore.QObject):
         self._apply_runner = None
         self._busy = False
         self.preview_whole = False                   # the last preview covers the whole region (so point handles line up)
+        self.embedded_split_mode = None              # preview mode of a movable before/after split the filter's own preview drew
+        self.split_override = None                   # (x %, y %) the user dragged that split to
         self._bad_previews = set()                   # filters whose own preview command failed: use the normal one
         self.seed = random.randrange(1, 2 ** 31)     # shared by preview and apply, so they agree
 
@@ -235,7 +238,7 @@ class Studio(QtCore.QObject):
             probes = pixels.background_probes(data, w, h, pb, 3 if depth == 8 else 6)    # 16-bit data is big-endian
         return engine.Job(command=command, arguments=frags, width=w, height=h, data=data,
                           depth=depth, mask=mask, alpha_mode=self.settings.get("transparency"), seed=self.seed,
-                          bg_probes=probes,
+                          bg_probes=probes, watch_split=preview, split=self.split_override if preview else None,
                           definitions=extra_defs if extra_defs and os.path.isfile(extra_defs) else "")
 
     def _plan_preview(self, fdef, force_full=False, fast=False):
@@ -325,7 +328,11 @@ class Studio(QtCore.QObject):
                     self.status.emit(str(exc), True)
                     return
                 self.preview_whole = kind != "1:1 crop"
+                self.embedded_split_mode = engine.read_split_mode(result[4])
                 self.previewReady.emit(before, after)
+                reported = engine.read_status(result[4])
+                if reported:
+                    self.reported.emit(fdef.id, reported, dict(values))
                 took = time.time() - started
                 note = ""
                 if kind == "whole image":
@@ -439,7 +446,9 @@ class Studio(QtCore.QObject):
                     bridge.write(snap, rgba, mode, fdef.name, size, notes)
                     self.settings.remember_last(fdef.id, values)
                     if size != (snap.w, snap.h):
-                        notes.insert(0, "The result has a new size (%dx%d), so it was added as a new layer." % size)
+                        notes.insert(0, "The result has a new size (%dx%d), so it %s%s." % (
+                            size + ("replaced the original layer" if mode == "replace" else "was added as a new layer",
+                                    ", which reaches beyond the canvas (that is the full result)" if size[0] > snap.w or size[1] > snap.h else "")))
                     self.status.emit(" ".join(["Applied %s." % fdef.name] + notes), False)
             except (engine.GmicError, bridge.BridgeError) as exc:
                 self.status.emit(str(exc), True)
@@ -494,4 +503,9 @@ def _explain(error):
     if "nknown command" in text or "nknown function" in text:
         return ("%s\nThis filter needs a newer gmic than the one installed. Update gmic, "
                 "or use Settings > Update filter list." % text)
+    if "timed out" in text:
+        return ("%s\nThis filter never finished. Some filters wait for a plot window or the network, "
+                "which this plugin cannot give them (it runs offline, with no windows)." % text)
+    if "Undefined argument" in text:
+        return ("%s\nA text or file field may be empty: G'MIC cannot take an empty value, so fill it in." % text)
     return text

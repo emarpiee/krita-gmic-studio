@@ -308,7 +308,7 @@ class StudioDocker(DockWidget):
         self.preview.handleMoved.connect(self.form.set_point)
         self.preview.dragFinished.connect(self._drag_finished)
         self.preview.splitMoved.connect(self._split_moved)
-        self.preview.splitReleased.connect(self._refresh_view)
+        self.preview.splitReleased.connect(self._split_released)
         self.form.buttonPressed.connect(lambda _i: self._run_preview())
         self.fav.clicked.connect(self._toggle_favorite)
         self.reset.clicked.connect(self.form.reset)
@@ -336,6 +336,7 @@ class StudioDocker(DockWidget):
         st.busyChanged.connect(self._on_busy)
         st.previewBusy.connect(self._on_preview_busy)
         st.status.connect(self._on_status)
+        st.reported.connect(self._on_reported)
         st.previewReady.connect(self._on_preview)
         self._update_banner()
         self.studio.sync_document()
@@ -580,6 +581,7 @@ class StudioDocker(DockWidget):
 
     def _show_filter(self, fdef, values):
         self.fdef = fdef
+        self.studio.split_override, self.studio.embedded_split_mode = None, None     # another filter, another split
         self.title.setText("<b>%s</b>" % _escape(fdef.name))
         self._refresh_fav()
         self._sync_buttons()
@@ -844,6 +846,13 @@ class StudioDocker(DockWidget):
             else:
                 self.timer.start(int(self.studio.settings.get("preview_delay_ms")))
 
+    def _on_reported(self, filter_id, status, sent):
+        """A filter handed back new parameter values (a point it moved, a hidden value): show them, without a new preview."""
+        if self.fdef is None or self.fdef.id != filter_id or self.preview.dragging:
+            return
+        if self.form.apply_status(status, sent):
+            self._refresh_handles()
+
     def _drag_finished(self):
         """Let go of a handle: one full-quality render of where it ended up."""
         if self.live.isChecked() and self.fdef:
@@ -899,7 +908,7 @@ class StudioDocker(DockWidget):
     def _view_mode(self):
         mode = int(self.studio.settings.get("preview_mode"))
         same = self._before is not None and self._after is not None and self._before.size() == self._after.size()
-        return mode if same else 0
+        return mode if same or mode in DUPLICATE_MODES else 0           # gmic lays the duplicates out itself, whatever the sizes
 
     def _sync_mode_button(self):
         number = int(self.studio.settings.get("preview_mode"))
@@ -917,8 +926,21 @@ class StudioDocker(DockWidget):
         self.preview.set_compare(None)
         self._show(self._before)
 
+    def _embedded_split(self):
+        """Mode of the before/after split the filter's own preview drew, while the plain result is shown."""
+        return self.studio.embedded_split_mode if self._view_mode() == 0 else None
+
     def _split_moved(self, x, y):
-        self.studio.settings.set("preview_split", [x, y])
+        if self._embedded_split():
+            self.studio.split_override = (x, y)
+        else:
+            self.studio.settings.set("preview_split", [x, y])
+
+    def _split_released(self):
+        if self._embedded_split():
+            self._run_preview()                            # the filter draws it: render again with the divider moved
+        else:
+            self._refresh_view()
 
     def _refresh_view(self):
         """Show the result in the chosen preview mode."""
@@ -928,8 +950,8 @@ class StudioDocker(DockWidget):
         self._split_token += 1
         if mode in DUPLICATE_MODES:
             token = self._split_token
-            self.preview.set_compare(None)
             self._show(self._after)
+            self.preview.set_compare(None, mode, split)              # only the divider; gmic composes the picture
 
             def ready(image):
                 if image is not None and token == self._split_token and self._view_mode() == mode:
@@ -938,7 +960,11 @@ class StudioDocker(DockWidget):
             self.studio.render_split(self._before, self._after, mode, split[0], split[1], ready)
             return
         self._show(self._after)
-        self.preview.set_compare(self._before, mode, split)
+        embedded = self._embedded_split()
+        if embedded:
+            self.preview.set_compare(None, embedded, self.studio.split_override or (50.0, 50.0))
+        else:
+            self.preview.set_compare(self._before, mode, split)
 
     def _refresh_handles(self):
         """Draggable handles for the filter's points, when the preview shows the whole image they refer to."""
@@ -959,7 +985,7 @@ class StudioDocker(DockWidget):
                     self.studio.presets.touch(self.preset_id)   # keeps what you use at the top of the list
                 except OSError:
                     pass                                         # an unwritable presets file must not block Apply
-            self.studio.apply(self.fdef, self.form.values())
+            self.studio.apply(self.fdef, self.form.apply_values())
 
     def _on_busy(self, busy):
         self._sync_progress()

@@ -262,13 +262,27 @@ def test_region_is_whole_canvas_even_if_layer_is_small(app, studio):
     assert (snap.x, snap.y, snap.w, snap.h) == (0, 0, 40, 30)
 
 
-def test_resized_result_goes_on_a_new_layer(app, studio):
+def test_a_resized_result_still_replaces_the_original_when_asked(app, studio):
     node = krita.Node("L", 10, 10)
     doc = use_doc(node)
     snap = bridge.grab()
-    out = bridge.write(snap, bytes(20 * 15 * 4), "replace", "Frame", size=(20, 15))   # "replace" is overridden
-    assert doc.root.children == [node, out] and out.name() == "L (Frame)"
+    out = bridge.write(snap, bytes(20 * 15 * 4), "replace", "Frame", size=(20, 15))
+    assert doc.root.children == [out] and out.name() == "L"                    # the original is gone, the name is kept
     assert out.set_calls == [(-5, -2, 20, 15, 20 * 15 * 4)] and node.set_calls == []      # centered on the 10x10 original
+    node = krita.Node("M", 10, 10)
+    doc = use_doc(node)
+    out = bridge.write(bridge.grab(), bytes(20 * 15 * 4), "new_layer", "Frame", size=(20, 15))
+    assert doc.root.children == [node, out] and out.name() == "M (Frame)"
+
+
+def test_replace_that_krita_refuses_hides_the_original_and_says_so(app, studio, monkeypatch):
+    node = krita.Node("L", 10, 10)
+    doc = use_doc(node)
+    node.remove = lambda: False
+    notes = []
+    out = bridge.write(bridge.grab(), bytes(10 * 10 * 4), "replace", "Blur", notes=notes)
+    assert node in doc.root.children and out in doc.root.children and not node.visible()
+    assert any("could not be removed" in n for n in notes)
 
 
 def _preview_sizes(app, studio, fdef):
@@ -1835,6 +1849,50 @@ def test_button_is_one_shot_hidden_rows_are_hidden_and_grayed_rows_disabled(app)
     assert gray[0].isEnabled() and not gray[1].isEnabled()
 
 
+def test_a_pressed_button_stays_part_of_apply_until_a_value_changes(app):
+    from gmic_studio.param_form import ParamForm
+    fdef = filters.parse_definitions(_BUTTON_DEFS)[0]
+    form = ParamForm()
+    form.set_filter(fdef)
+    btn = [b for b in form.findChildren(QtWidgets.QPushButton) if b.text() == "Reset Pose"][0]
+    assert form.apply_values()["1"] == 0
+    btn.click()
+    assert form.apply_values()["1"] == 1                                       # pressed, preview not run yet
+    form.release_buttons()                                                     # the preview ran with it
+    assert form.run_values()["1"] == 0 and form.apply_values()["1"] == 1       # Apply still repeats what the preview shows
+    form.set_values({"0": 7})
+    assert form.apply_values()["1"] == 0                                       # a changed value makes the button history stale
+
+
+_POINT_DEFS = '''#@gui T > Pt : cmd
+#@gui : A = int(3,0,10)
+#@gui : P = point(50,50)
+#@gui : N = note("x")
+#@gui : Q = point(10,10)
+#@gui : H = value(-1)
+#@gui : Go = button(0)
+'''
+
+
+def test_values_a_filter_reports_back_move_only_what_it_changed_and_never_run_again(app):
+    from gmic_studio.param_form import ParamForm
+    fdef = filters.parse_definitions(_POINT_DEFS)[0]
+    form = ParamForm()
+    form.set_filter(fdef)
+    changes = []
+    form.changed.connect(lambda: changes.append(1))
+    sent = form.values()
+    form.set_values({"1": [20.0, 30.0]})                                       # the user dragged P after the preview started
+    del changes[:]
+    moved = form.apply_status("{3}{70,80}{15,15}{5}{1}", sent)
+    assert moved and not changes                                               # nothing triggers another preview
+    assert form.values()["1"] == [20.0, 30.0]                                  # the newer edit wins
+    assert form.values()["3"] == [15.0, 15.0] and form.values()["4"] == "5" and form.values()["0"] == 3
+    assert form.apply_status("{}{}{}{}{}", form.values()) is False             # empty groups: unchanged
+    assert form.apply_status("{9}", sent) is True and form.values()["0"] == 9  # fewer groups than parameters is fine
+    assert fdef.command_line(form.values())[1][3] == "5"                       # a reported hidden value is what gets sent
+
+
 def test_visibility_marker_spreads_to_neighbouring_notes():
     fdef = filters.parse_definitions('''#@gui T > P : cmd
 #@gui : n1 = note("before")
@@ -1901,6 +1959,62 @@ def test_preview_view_keeps_the_view_when_the_same_picture_changes_resolution(ap
     assert abs(v.zoom - 2.0) < 1e-6                                           # still the same part of the picture
     v.show_image(big.scaled(300, 300))                                        # a different picture shape: refit
     assert abs(v.zoom - min(400 / 300.0, 300 / 300.0)) < 0.05
+
+
+def test_duplicate_modes_have_a_draggable_divider_and_accept_a_result_of_another_size(app, studio):
+    from gmic_studio.compat import QtCore, QtGui
+    from gmic_studio.preview_view import PreviewView
+    fmt = QtGui.QImage.Format.Format_RGBA8888 if hasattr(QtGui.QImage, "Format") else QtGui.QImage.Format_RGBA8888
+    img = QtGui.QImage(100, 100, fmt)
+    img.fill(QtGui.QColor(0, 0, 255))
+    v = PreviewView()
+    v.resize(100, 100)
+    v.show_image(img)
+    v.fit()
+    v.set_compare(None, 5, (50.0, 50.0))                                      # Duplicate Top: only the divider is drawn here
+    assert v._before is None and v._mode == 5
+    moved, released = [], []
+    v.splitMoved.connect(lambda x, y: moved.append((round(x), round(y))))
+    v.splitReleased.connect(lambda: released.append(1))
+    c = v._split_pos()
+    _click(v, "press", c.x(), c.y())
+    _click(v, "move", c.x(), v._off.y() + v._zoom * 20)
+    _click(v, "release", c.x(), v._off.y() + v._zoom * 20)
+    assert moved and moved[-1][1] == 20 and released                          # dragged to 20 %, then a new render is asked for
+    v.set_compare(None, 0)
+    assert v._mode == 0
+    d = _make_docker(app, studio, doc=False)
+    d._before, d._after = img, img.scaled(120, 80)
+    studio.settings.set("preview_mode", 9)
+    assert d._view_mode() == 9                                                # gmic resizes both to the larger one
+    studio.settings.set("preview_mode", 2)
+    assert d._view_mode() == 0                                                # the natively drawn modes still need equal sizes
+
+
+def test_a_split_the_filter_draws_itself_can_be_dragged_and_renders_again(app, studio):
+    from gmic_studio.compat import QtGui
+    d = _make_docker(app, studio, doc=False)
+    fmt = QtGui.QImage.Format.Format_RGBA8888 if hasattr(QtGui.QImage, "Format") else QtGui.QImage.Format_RGBA8888
+    img = QtGui.QImage(60, 40, fmt)
+    img.fill(QtGui.QColor(0, 0, 255))
+    d.fdef = studio.index.get("Basics > Blur")
+    runs = []
+    d._run_preview = lambda *a, **k: runs.append(1)
+    studio.embedded_split_mode = 9                                             # the preview drew a Duplicate Horizontal split
+    d._before = d._after = img
+    d.preview.show_image(img)
+    d._refresh_view()
+    assert d.preview._mode == 9 and d.preview._before is None                  # only the divider is ours
+    d.preview.splitMoved.emit(50.0, 20.0)
+    assert studio.split_override == (50.0, 20.0)
+    assert studio.settings.get("preview_split") != [50.0, 20.0]                # the Qt-side modes keep their own position
+    d.preview.splitReleased.emit()
+    assert runs == [1]                                                         # released: render again with the divider moved
+    studio.embedded_split_mode = None
+    d._refresh_view()
+    assert d.preview._mode == 0
+    d.preview.splitReleased.emit()                                             # a normal split: no new render
+    assert runs == [1]
 
 
 def test_split_modes_show_the_original_in_the_right_places(app):
@@ -1976,10 +2090,10 @@ def test_keep_original_size_cuts_a_bigger_result_around_its_center_and_the_previ
     from gmic_studio.compat import QtGui
     ready(app, studio)
     fmt = QtGui.QImage.Format.Format_RGBA8888 if hasattr(QtGui.QImage, "Format") else QtGui.QImage.Format_RGBA8888
-    big = QtGui.QImage(200, 100, fmt)
+    big = QtGui.QImage(200, 120, fmt)
     big.fill(QtGui.QColor(0, 0, 255))
     p = QtGui.QPainter(big)
-    p.fillRect(80, 40, 40, 20, QtGui.QColor(255, 0, 0))                       # the middle of the big picture
+    p.fillRect(80, 50, 40, 20, QtGui.QColor(255, 0, 0))                       # the middle of the big picture
     p.end()
     assert studio._keep_size(big, 40, 20).size() == big.size()                 # off: untouched
     studio.settings.set("keep_size", True)
@@ -1990,10 +2104,10 @@ def test_keep_original_size_cuts_a_bigger_result_around_its_center_and_the_previ
     assert (grown.width(), grown.height()) == (40, 20)
     from gmic_studio.preview_view import PreviewView
     v = PreviewView()
-    v.resize(200, 100)
+    v.resize(200, 120)
     v.show_image(big)
     v.fit()
-    v.set_frame((100, 50))
+    v.set_frame((100, 60))
     shot = v.grab().toImage()
     at = lambda ix, iy: shot.pixelColor(int(v._off.x() + v._zoom * ix), int(v._off.y() + v._zoom * iy))
     inside, outside = at(60, 30), at(5, 5)                                     # image pixels, inside / outside the 100x50 frame

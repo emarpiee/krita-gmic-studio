@@ -26,6 +26,8 @@ MODES = [("Full", 0), ("Forward Horizontal", 1), ("Forward Vertical", 2), ("Back
          ("Duplicate Right", 8), ("Duplicate Horizontal", 9), ("Duplicate Vertical", 10), ("Checkered", 11),
          ("Checkered Inverse", 12)]
 DUPLICATE_MODES = range(5, 11)
+_ACROSS = (1, 3, 5, 7, 9, 11, 12)      # modes whose divider is a horizontal line (the split's Y matters)
+_DOWN = (2, 4, 6, 8, 10, 11, 12)       # ... a vertical line (the split's X matters)
 
 
 def original_regions(mode, sx, sy):
@@ -108,8 +110,13 @@ class PreviewView(QtWidgets.QWidget):
             widget.raise_()
 
     def set_compare(self, before, mode=0, split=(50.0, 50.0)):
-        """Show `before` (the original) beside the result in a split mode; `before=None` shows only the result."""
-        self._before, self._mode, self._split = (before, mode, list(split)) if mode in (1, 2, 3, 4, 11, 12) else (None, 0, list(split))
+        """Show `before` (the original) over the result in a split mode; `before=None` shows only the result.
+        The Duplicate modes (5..10) are composed elsewhere: they pass no `before`, and only get the movable divider."""
+        if mode in (1, 2, 3, 4, 11, 12):
+            self._before, self._mode = before, mode
+        else:
+            self._before, self._mode = None, (mode if mode in DUPLICATE_MODES else 0)
+        self._split = list(split)
         self.update()
 
     def set_frame(self, size):
@@ -256,7 +263,7 @@ class PreviewView(QtWidgets.QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == _LEFT:
-            if self._before is not None and self._image is not None:
+            if self._mode and self._image is not None:
                 c, pos = self._split_pos(), self._pos(event)
                 if (c.x() - pos.x()) ** 2 + (c.y() - pos.y()) ** 2 <= (HANDLE_HIT + 4) ** 2:
                     self._split_grab = True
@@ -340,23 +347,21 @@ class PreviewView(QtWidgets.QWidget):
         p.end()
 
     def _draw_compare(self, p, target):
-        if self._before is None:
+        if not self._mode:
             return
-        p.save()
-        for x0, y0, x1, y1 in original_regions(self._mode, *self._split):
-            part = QtCore.QRectF(target.x() + x0 * target.width(), target.y() + y0 * target.height(),
-                                 (x1 - x0) * target.width(), (y1 - y0) * target.height())
-            p.setClipRect(part)
-            p.drawImage(target, self._before)
-        p.restore()
+        if self._before is not None:
+            p.save()
+            for x0, y0, x1, y1 in original_regions(self._mode, *self._split):
+                part = QtCore.QRectF(target.x() + x0 * target.width(), target.y() + y0 * target.height(),
+                                     (x1 - x0) * target.width(), (y1 - y0) * target.height())
+                p.setClipRect(part)
+                p.drawImage(target, self._before)
+            p.restore()
         c = self._split_pos()
         p.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 230), 1, enum(QtCore.Qt, "PenStyle", "DashLine")))
-        if self._mode in (1, 3):
+        if self._mode in _ACROSS:
             p.drawLine(QtCore.QPointF(target.left(), c.y()), QtCore.QPointF(target.right(), c.y()))
-        elif self._mode in (2, 4):
-            p.drawLine(QtCore.QPointF(c.x(), target.top()), QtCore.QPointF(c.x(), target.bottom()))
-        else:
-            p.drawLine(QtCore.QPointF(target.left(), c.y()), QtCore.QPointF(target.right(), c.y()))
+        if self._mode in _DOWN:
             p.drawLine(QtCore.QPointF(c.x(), target.top()), QtCore.QPointF(c.x(), target.bottom()))
         p.setRenderHint(enum(QtGui.QPainter, "RenderHint", "Antialiasing"), True)
         p.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0, 200), 3))

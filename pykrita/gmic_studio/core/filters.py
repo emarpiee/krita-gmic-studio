@@ -13,6 +13,8 @@ _GUI_RE = re.compile(r"^#@gui(?:_en)?[ \t]+(.*)$")
 # `=type(args)`; type may carry prefixes (`_` = hidden-ish, `~` = keep on reset); notes may use {} instead of ()
 _PARAM_RE = re.compile(r"^(.*?)\s*=\s*[_~]*(\w+)\s*[({](.*)[)}](?:_(\d)([+*-]?))?\s*$", re.DOTALL)  # optional `_0`, `_1+` ... suffix
 _TAG_RE = re.compile(r"<[^>]+>")
+_INPUT_MODE_RE = re.compile(r"^(.*\S)\s+:\s+\S{1,2}$")
+_OCTAL_RE = re.compile(r"[0-3][0-7]{2}")
 _UPDATE_RE = re.compile(r"update(\d+)\.gmic$")
 
 NON_VALUE_KINDS = ("note", "separator", "link")
@@ -66,7 +68,8 @@ def quote(text):
     """Quote a string for a G'MIC command so it can never close its own quotes.
 
     Real newlines become the two characters `\\n` (how G'MIC writes multi-line text, same as the
-    definitions' own defaults); a literal `\\n` is kept; every other backslash and every quote is escaped.
+    definitions' own defaults); a literal `\\n` and an octal `\\251` are kept; every other backslash and every quote
+    is escaped.
     """
     text = str(text).replace("\r\n", "\n").replace("\r", "\n")
     out, i = [], 0
@@ -78,6 +81,8 @@ def quote(text):
             if text[i + 1:i + 2] == "n":
                 out.append("\\n")
                 i += 1
+            elif _OCTAL_RE.match(text, i + 1):          # `\251` is how G'MIC writes a character such as the copyright sign
+                out.append("\\")
             else:
                 out.append("\\\\")
         elif ch == '"':
@@ -148,11 +153,14 @@ class Param:
             return ",".join(str(int(v)) for v in value)
         if k == "point":
             return "%.10g,%.10g" % (value[0], value[1])
+        if k == "folder" and not value:
+            return '"."'                  # gmic cannot take an empty argument at all; the current folder is the usual meaning
         if k in ("text", "file", "folder"):
             return quote(value)
         if k == "button":
             return str(value)
-        return str(self.default if self.default is not None else 0)  # value / hidden / unknown
+        value = value if value is not None else self.default                   # value / hidden / unknown
+        return str(value if value is not None else 0)
 
 
 def _unesc(text):
@@ -169,13 +177,14 @@ def _make_param(label, kind, args):
         p.default = int(_num(toks[0]) if toks else 0)
         p.minimum = _num(toks[1], 0) if len(toks) > 1 else 0
         p.maximum = _num(toks[2], 100) if len(toks) > 2 else 100
-        p.default = int(p.default)
-        p.minimum, p.maximum = min(p.minimum, p.default), max(p.maximum, p.default)    # the stated default always fits
+        p.minimum, p.maximum = min(p.minimum, p.maximum), max(p.minimum, p.maximum)
+        p.default = int(max(p.minimum, min(p.maximum, p.default)))        # a default outside the range is pulled in, as G'MIC-Qt does
     elif kind == "float":
         p.default = _num(toks[0]) if toks else 0.0
         p.minimum = _num(toks[1], 0) if len(toks) > 1 else 0.0
         p.maximum = _num(toks[2], 100) if len(toks) > 2 else 100.0
-        p.minimum, p.maximum = min(p.minimum, p.default), max(p.maximum, p.default)
+        p.minimum, p.maximum = min(p.minimum, p.maximum), max(p.minimum, p.maximum)
+        p.default = max(p.minimum, min(p.maximum, p.default))
     elif kind == "bool":
         p.default = bool(toks) and toks[0].strip().lower() in ("1", "true")
     elif kind == "choice":
@@ -330,12 +339,19 @@ def parse_param_block(text):
 
 def parse_definitions(text, source=""):
     """Parse the `#@gui` lines of a G'MIC definition file into FilterDef objects."""
-    filters, current = [], None
+    filters, current, folders = [], None, []
     for raw in text.splitlines():
         m = _GUI_RE.match(raw.rstrip("\r\n"))
         if not m:
             continue
         body = m.group(1).strip()
+        if ":" not in body and not body.startswith("!"):        # a folder line: each leading `_` first closes one open folder
+            name = _TAG_RE.sub("", body.lstrip("_")).strip()
+            del folders[max(0, len(folders) - (len(body) - len(body.lstrip("_")))):]
+            if name:
+                folders.append(_unesc(name))
+            current = None
+            continue
         if body.startswith(":"):                       # parameter of the current filter
             if current is None:
                 continue
@@ -344,6 +360,9 @@ def parse_definitions(text, source=""):
                 current.params.append(param)
             continue
         current = None
+        mode = _INPUT_MODE_RE.match(body)              # `Name:command,preview : *`: the trailing part is G'MIC-Qt's default input mode
+        if mode and ":" in mode.group(1):
+            body = mode.group(1)
         head, sep, spec = body.partition(" : ")
         if not sep:
             head, sep, spec = body.partition(":")
@@ -353,11 +372,13 @@ def parse_definitions(text, source=""):
         if not COMMAND_RE.match(cmd):
             continue
         preview, factor = _parse_preview_spec(spec.partition(",")[2])
+        if cmd.startswith("_none"):
+            continue                                   # info-only entry ("New Version Available!"), nothing to run
         parts = [_TAG_RE.sub("", s).strip().lstrip("_").strip() for s in head.split(" > ")]
         parts = [s for s in parts if s]
         if not parts:
             continue
-        current = FilterDef(path=tuple(parts[:-1]), name=parts[-1], command=cmd, preview_command=useful_preview(cmd, preview))
+        current = FilterDef(path=tuple(folders) + tuple(parts[:-1]), name=parts[-1], command=cmd, preview_command=useful_preview(cmd, preview))
         if factor is not None:
             current.preview_factor = factor
         filters.append(current)
@@ -399,10 +420,13 @@ class FilterIndex:
             candidates = [explicit_definitions]
         else:
             cached, cache_path = gmicqt_cache.load()
+            update = find_definition_files()
+            if cached and update and os.path.getmtime(update[0]) > os.path.getmtime(cache_path):
+                cached = []                  # the cache predates gmic's own definitions: its parameter lists may no longer fit the commands
             if cached:
                 filters += cached
                 sources.append(cache_path)
-            candidates = [] if cached else find_definition_files()
+            candidates = [] if cached else update
         for path in candidates:
             try:
                 with open(path, "r", encoding="utf-8", errors="replace") as fh:

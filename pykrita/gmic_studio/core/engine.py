@@ -130,9 +130,13 @@ class Job:
     definitions: str = ""        # extra definition file passed with `-m`
     seed: int = None             # random seed, so preview and Apply of a random filter agree
     bg_probes: list = None       # [(x, y)] transparent pixels used to detect & remove a filter's background fill
+    watch_split: bool = False    # previews: note whether the filter draws its own movable before/after split (and where)
+    split: tuple = None          # (x %, y %): where to put that split (the user dragged it)
 
 
 SCRIPT_NAME = "job.gmic"
+STATUS_NAME = "status.txt"
+MARKER_NAME = "split.txt"
 JOB_COMMAND = "studio_job"
 
 
@@ -221,6 +225,7 @@ def build_script(job, in_name="in.png", mask_name="mask.png", out_name="out.png"
     steps += ["%s[%d]" % (job.command, t)]
     if job.arguments:
         steps += [",".join(job.arguments)]
+    steps += ["_studio_status=${}"]                  # what the filter reports back (new parameter values)
     if preserve:
         # If the filter changed the image size, the old opacity no longer fits: keep the result opaque.
         steps += ["if", "{w#%d==w#%d&&h#%d==h#%d}" % (t, t + 1, t, t + 1),
@@ -241,6 +246,10 @@ def build_script(job, in_name="in.png", mask_name="mask.png", out_name="out.png"
         steps += ["mul[0]", "257", "round[0]", "cut[0]", "0,65535", "output[0]", out_name + ",2"]
     else:
         steps += ["round[0]", "output[0]", out_name]
+    # Last, so that a problem here can never cost the result: the status as numbers (characters) in a text file.
+    steps += ["('S:${_studio_status}')", "output[-1]", STATUS_NAME]
+    if job.watch_split or job.split is not None:
+        steps += ["('M:${_studio_split_mode}')", "output[-1]", MARKER_NAME]
     return "%s : %s\n" % (JOB_COMMAND, " ".join(steps))
 
 
@@ -290,6 +299,8 @@ class Runner:
                 pngio.write(os.path.join(workdir, "mask.png"), job.width, job.height, job.mask, pngio.GRAY, 8)
             with open(os.path.join(workdir, SCRIPT_NAME), "w", encoding="utf-8") as fh:
                 fh.write(build_script(job))
+                if job.watch_split or job.split is not None:
+                    fh.write(split_override(job.split))
             args = build_args(self.exe, job)
             with self._lock:
                 if self._cancelled:
@@ -309,7 +320,7 @@ class Runner:
             if self._cancelled:
                 raise Cancelled()
             result = os.path.join(workdir, "out.png")
-            if self._proc.returncode != 0 or not os.path.isfile(result):
+            if not os.path.isfile(result):                # the result is written before the status, so it alone decides
                 text = _ANSI_RE.sub("", out.decode("utf-8", "replace"))
                 tail = "\n".join(text.strip().splitlines()[-8:])
                 raise GmicError(tail or "gmic exited with code %s" % self._proc.returncode)
@@ -323,6 +334,91 @@ class Runner:
                 log.get().warning("failed %s after %.2fs: %s", job.command, time.time() - started, str(exc)[-400:])
             shutil.rmtree(workdir, ignore_errors=True)
             raise
+
+
+_DEF_START = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s*:(?!=)")
+_SPLIT_POS = "posx,posy:=$is_movable?cut([$3,$4],0,100):[50,50]"
+_split_cache = {}
+
+
+def _split_definition():
+    """G'MIC's own `gui_split_preview` (the before/after view some filters draw in their preview), as text, or ''."""
+    for path in filters.find_definition_files():
+        try:
+            key = (path, os.path.getmtime(path))
+            if key not in _split_cache:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    lines = fh.read().split("\n")
+                body = []
+                for i, line in enumerate(lines):
+                    if line.startswith("gui_split_preview :"):
+                        body = [line]
+                        for more in lines[i + 1:]:
+                            if _DEF_START.match(more) or more.startswith("#@"):
+                                break
+                            body.append(more)
+                        break
+                _split_cache[key] = "\n".join(body)
+            if _split_cache[key]:
+                return _split_cache[key]
+        except OSError:
+            pass
+    return ""
+
+
+def split_override(split):
+    """A copy of `gui_split_preview` that reports itself (`_studio_split_mode`) and takes the split position from
+    `split` = (x %, y %) when given. Redefining the command inside the job file is how the position is passed in.
+    Returns '' when the definition cannot be found (the filter's own fixed position is then used)."""
+    text = _split_definition()
+    if _SPLIT_POS not in text:
+        return ""
+    if split is None:
+        replacement = _SPLIT_POS
+    else:
+        replacement = "posx,posy:=$is_movable?cut([%.6g,%.6g],0,100):[50,50]" % (float(split[0]), float(split[1]))
+    return text.replace(_SPLIT_POS, replacement + "\nif $is_movable _studio_split_mode=$2 fi", 1) + "\n"
+
+
+def read_split_mode(workdir):
+    """The preview mode number of the movable before/after split the filter drew, or None."""
+    try:
+        with open(os.path.join(workdir, MARKER_NAME), "r", encoding="ascii", errors="replace") as fh:
+            nums = [int(t) for t in re.split(r"[\s,]+", fh.read().strip()) if t.lstrip("-").isdigit()]
+    except OSError:
+        return None
+    text = "".join(chr(n) for n in nums if 0 < n < 0x110000)
+    return int(text[2:]) if text.startswith("M:") and text[2:].isdigit() else None
+
+
+def read_status(workdir):
+    """The status string a filter reported (`{v1}{v2}...`, parameter values for the host), or ''."""
+    try:
+        with open(os.path.join(workdir, STATUS_NAME), "r", encoding="ascii", errors="replace") as fh:
+            nums = [int(t) for t in re.split(r"[\s,]+", fh.read().strip()) if t.lstrip("-").isdigit()]
+    except OSError:
+        return ""
+    text = "".join(chr(n) for n in nums if 0 < n < 0x110000)
+    return text[2:] if text.startswith("S:") else ""
+
+
+def split_groups(status):
+    """`{1}{2,3}{}{a b}` -> ['1', '2,3', '', 'a b']; braces inside a group are kept."""
+    out, depth, cur = [], 0, []
+    for ch in status or "":
+        if ch == "{":
+            depth += 1
+            if depth == 1:
+                cur = []
+                continue
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                out.append("".join(cur))
+                continue
+        if depth:
+            cur.append(ch)
+    return out
 
 
 def split_preview(exe, before_png, after_png, mode, x, y, timeout=60):

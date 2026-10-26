@@ -132,8 +132,6 @@ def write(snap, rgba, mode, label, size=None, notes=None):
     node, doc = snap.node, snap.doc
     w, h = size or (snap.w, snap.h)
     if (w, h) != (snap.w, snap.h):
-        if mode == "replace":
-            mode = "new_layer"                   # a resized result cannot take the original's place
         dup = doc.createNode("%s (%s)" % (node.name(), label), "paintlayer")
         if (node.colorModel(), node.colorDepth()) != (doc.colorModel(), doc.colorDepth()):
             dup.setColorSpace(node.colorModel(), node.colorDepth(), node.colorProfile())
@@ -153,13 +151,22 @@ def write(snap, rgba, mode, label, size=None, notes=None):
         _hide_original(doc, node, notes)         # first, while only the original is selected
     parent = node.parentNode() or doc.rootNode()
     parent.addChildNode(dup, node)
-    if mode == "replace":
-        node.remove()
+    if mode == "replace" and not _remove(node):
+        _hide_original(doc, node, notes)         # Krita refused: never leave two visible copies without saying so
+        notes.append("The original could not be removed, so it was hidden.")
     if not dup.visible():                        # never leave the result invisible
         dup.setVisible(True)
     doc.setActiveNode(dup)
     doc.refreshProjection()
     return dup
+
+
+def _remove(node):
+    """Remove a layer; True when it is really gone (Krita's remove() reports failure with False)."""
+    try:
+        return node.remove() is not False
+    except Exception:
+        return False
 
 
 def _hide_original(doc, node, notes):

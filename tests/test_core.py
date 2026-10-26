@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import stat
 import struct
 import sys
@@ -85,7 +86,6 @@ def test_depth_conversions():
 
 # -- definitions parser -----------------------------------------------------
 SAMPLE = '''
-#@gui _<b>Colors</b>
 #@gui Colors > <i>Fancy</i> Tone : fx_tone, fx_tone_preview(0)
 #@gui : Amount = float(1.5,0,10)
 #@gui : Steps = int(4,1,9)
@@ -129,6 +129,7 @@ def test_serialization_and_clamping():
 
 def test_quote_strips_control_chars():
     assert filters.quote("a\nb\x00c") == '"a\\nbc"'
+    assert filters.quote("\\251 John \\9 x") == '"\\251 John \\\\9 x"'          # G'MIC's octal escape (the copyright sign) survives
 
 
 def test_command_name_validated():
@@ -183,7 +184,8 @@ def job(**kw):
 
 def test_script_plain_and_preserve():
     a = engine.build_script(job(alpha_mode="filter"))
-    assert a == ("studio_job : -input in.png blur[0] 2 to_rgba[0] cut[0] 0,255 round[0] output[0] out.png\n")
+    assert a == ("studio_job : -input in.png blur[0] 2 _studio_status=${} to_rgba[0] cut[0] 0,255 round[0] output[0] out.png "
+                 "('S:${_studio_status}') output[-1] status.txt\n")
     a = engine.build_script(job()).split()
     assert "split_opacity[0]" in a and "append[0,1]" in a and a.index("split_opacity[0]") < a.index("blur[0]")
 
@@ -192,7 +194,7 @@ def test_script_16bit_with_mask_and_defs():
     a = engine.build_script(job(depth=16, mask=bytes(2), alpha_mode="filter")).split()
     assert a.index("div[0]") < a.index("[0]") < a.index("blur[2]") < a.index("keep[2]") < a.index("output[0]")
     assert "{w#2==w#0&&h#2==h#0}" in a and a.index("{w#2==w#0&&h#2==h#0}") < a.index("div[1]") < a.index("fi")
-    assert a[-2:] == ["output[0]", "out.png,2"]
+    assert a[-5:] == ["output[0]", "out.png,2", "('S:${_studio_status}')", "output[-1]", "status.txt"]   # the status goes last
     assert engine.build_args("gmic", job(definitions="d.gmic")) == ["gmic", "-m", "d.gmic", "-m", "job.gmic", "studio_job"]
     assert engine.build_args("gmic", job()) == ["gmic", "-m", "job.gmic", "studio_job"]
 
@@ -317,15 +319,21 @@ def test_cache_survives_garbage_and_truncation():
     assert gmicqt_cache.parse(b"") == [] and gmicqt_cache.parse(b"junk" * 50) == []
 
 
-def test_index_prefers_krita_cache_over_update_files(tmp_path, monkeypatch):
+def test_index_prefers_krita_cache_unless_gmics_own_definitions_are_newer(tmp_path, monkeypatch):
     cfg = tmp_path / "gm"
     cfg.mkdir()
-    (cfg / gmicqt_cache.CACHE_NAME).write_bytes(_cache_bytes([("Zed", ["Cat"], "fx_zed", "")]))
-    (cfg / "update400.gmic").write_text("#@gui Other > Nope : fx_nope\n")
+    cache, update = cfg / gmicqt_cache.CACHE_NAME, cfg / "update400.gmic"
+    cache.write_bytes(_cache_bytes([("Zed", ["Cat"], "fx_zed", "")]))
+    update.write_text("#@gui Other > Nope : fx_nope\n")
     monkeypatch.setenv("GMIC_PATH", str(cfg))
+    os.utime(update, (1000, 1000))
+    os.utime(cache, (2000, 2000))
     idx = filters.FilterIndex.load()
     assert idx.get("Cat > Zed") and idx.get("Basics > Blur") and idx.get("Other > Nope") is None
-    assert idx.sources == [str(cfg / gmicqt_cache.CACHE_NAME)]
+    assert idx.sources == [str(cache)]
+    os.utime(update, (3000, 3000))                  # gmic was updated after the cache was written: its parameter lists win
+    idx = filters.FilterIndex.load()
+    assert idx.get("Cat > Zed") is None and idx.get("Other > Nope") and idx.sources == [str(update)]
 
 
 def test_real_krita_cache_if_present():
@@ -807,10 +815,63 @@ def test_point_handle_color_is_read_from_the_definition():
     assert ps[2].color == [255, 0, 0]                            # clamped into 0..255
 
 
-def test_a_default_outside_the_stated_range_is_kept_not_clamped():
-    ps = filters.parse_param_block('S=float(3,0,2)\nN=int(0,1,500)\nOK=float(1,0,2)')
-    assert (ps[0].minimum, ps[0].maximum, ps[0].default) == (0.0, 3.0, 3.0)
-    assert (ps[1].minimum, ps[1].maximum, ps[1].default) == (0, 500, 0)
-    assert (ps[2].minimum, ps[2].maximum) == (0.0, 2.0)
+def test_a_default_outside_the_stated_range_is_pulled_into_it_like_gmic_qt_does():
+    ps = filters.parse_param_block('S=float(3,0,2)\nN=int(0,1,500)\nOK=float(1,0,2)\nA=float(-180,0,180)\nR=int(5,10,0)')
+    assert (ps[0].minimum, ps[0].maximum, ps[0].default) == (0.0, 2.0, 2.0)
+    assert (ps[1].minimum, ps[1].maximum, ps[1].default) == (1, 500, 1)
+    assert (ps[2].minimum, ps[2].maximum, ps[2].default) == (0.0, 2.0, 1.0)
+    assert (ps[3].minimum, ps[3].maximum, ps[3].default) == (0.0, 180.0, 0.0)      # Quick Copyright's Orientation: not upside down
+    assert (ps[4].minimum, ps[4].maximum, ps[4].default) == (0, 10, 5)             # a reversed range is put in order
     f = filters.FilterDef((), "x", "c", ps)
-    assert f.command_line()[1][:2] == ["3", "0"]                  # the filter's own default reaches gmic unchanged
+    assert f.command_line()[1][:2] == ["2", "1"]
+
+def test_an_index_keeps_filters_whose_line_ends_with_an_input_mode():
+    text = ("#@gui 3D Mesh:fx_mesh3d,fx_mesh3d_preview(1) : *\n#@gui :Size=float(1,0,2)\n"
+            "#@gui Old Style : fx_old, fx_old_preview(1)\n#@gui :N=int(1,0,2)\n")
+    fs = filters.parse_definitions(text)
+    assert [(f.name, f.command, f.preview_command, len(f.params)) for f in fs] == [
+        ("3D Mesh", "fx_mesh3d", "fx_mesh3d_preview", 1), ("Old Style", "fx_old", "fx_old_preview", 1)]
+
+
+def test_status_groups_are_split_and_a_real_filter_can_report_values(tmp_path):
+    assert engine.split_groups("{1}{2,3}{}{a b}") == ["1", "2,3", "", "a b"]
+    assert engine.split_groups("") == [] and engine.split_groups("x{a{b}c}") == ["a{b}c"]
+    exe = engine.locate()
+    if not exe:
+        pytest.skip("needs a real gmic")
+    defs = tmp_path / "d.gmic"
+    defs.write_text("studio_report : u \\{\\}\\{9,8\\}\\{$1\\}\n")
+    job = engine.Job("studio_report", ["4"], 2, 2, bytes([9, 9, 9, 255]) * 4, definitions=str(defs))
+    w, h, depth, path, workdir = engine.Runner(exe, job, timeout=60).run()
+    try:
+        assert engine.split_groups(engine.read_status(workdir)) == ["", "9,8", "4"]
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_folder_lines_give_the_filters_their_categories_and_info_entries_are_skipped():
+    text = ("#@gui _<b>Rendering</b>\n#@gui A:fx_a\n#@gui _<b>Silhouettes</b>\n#@gui <b>Animals</b>\n#@gui Cat:fx_cat\n"
+            "#@gui _<b>Icons</b>\n#@gui Star:fx_star\n#@gui _\n#@gui Loose:fx_loose\n#@gui __<b>Testing</b>\n"
+            "#@gui <i>Afre</i>\n#@gui B > C:fx_c\n#@gui !<b><i>[ New Version Available! ]</i></b> : _none_, _none_\n")
+    assert [f.id for f in filters.parse_definitions(text)] == [
+        "Rendering > A", "Silhouettes > Animals > Cat", "Silhouettes > Icons > Star", "Silhouettes > Loose",
+        "Testing > Afre > B > C"]
+
+
+def test_split_override_takes_gmics_definition_and_moves_its_position(tmp_path, monkeypatch):
+    upd = tmp_path / "update999.gmic"
+    upd.write_text("other :\nfoo\ngui_split_preview : check 1 skip 2\nis_movable:=!isnan($3)\n"
+                   + engine._SPLIT_POS + "\nline 0,$posy\ngui_print_preview : bar\n")
+    monkeypatch.setattr(filters, "find_definition_files", lambda explicit="": [str(upd)])
+    engine._split_cache.clear()
+    text = engine.split_override((30, 70))
+    lines = text.splitlines()
+    assert lines[0].startswith("gui_split_preview :") and "gui_print_preview" not in text and "other" not in text
+    assert "posx,posy:=$is_movable?cut([30,70],0,100):[50,50]" in lines and "line 0,$posy" in lines
+    assert "if $is_movable _studio_split_mode=$2 fi" in lines                    # it reports itself
+    assert engine._SPLIT_POS in engine.split_override(None)                      # watching only: position untouched
+    upd.write_text("nothing here\n")
+    engine._split_cache.clear()
+    assert engine.split_override((1, 2)) == ""                                   # a changed definition: fall back quietly
+    script = engine.build_script(job(watch_split=True))
+    assert script.rstrip().endswith("('M:${_studio_split_mode}') output[-1] split.txt")
