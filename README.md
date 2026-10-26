@@ -6,6 +6,8 @@ A Krita plugin that gives you G'MIC filters in a docker panel, with a live previ
 
 Krita's built-in G'MIC window blocks Krita while it is open. G'MIC Studio is a docker instead, so you can keep working in Krita while you try a filter. It works offline.
 
+![The G'MIC Studio docker in Krita, with the Array [Faded] filter and its live preview](docs/screenshots/filters-tab-array_faded-live_preview.webp)
+
 ## Status
 
 - **Tested on Linux only** (Krita 6, gmic 3.7.4).
@@ -22,6 +24,8 @@ Krita's built-in G'MIC window blocks Krita while it is open. G'MIC Studio is a d
 - 13 preview modes from G'MIC-Qt (split, checkered, duplicate). Every split has a divider you can drag. Filters that draw their own before/after view, like Upscale [CNN2x], also get a draggable divider.
 - Point parameters appear as handles on the preview. Drag them to move the point.
 
+![The 3D Mesh filter, with colored point handles on the preview](docs/screenshots/favorites-tab-3d_mesh-point_handles.webp)
+
 **Parameters**
 - Supports button parameters, hidden and grayed-out parameters, and values that a filter sends back (for example, a point the filter moved).
 - Random filters use the same random seed in the preview and in Apply. Use the dice button to get a new seed.
@@ -32,6 +36,10 @@ Krita's built-in G'MIC window blocks Krita while it is open. G'MIC Studio is a d
 - Presets are in one list for all filters. Click a preset to preview it, double-click to apply it. You can export and import presets. You can also save presets inside the Krita document.
 - Each filter remembers its last values. There is a "Repeat last filter" action.
 
+![The Favorites tab, with Array [Faded] applied to the image](docs/screenshots/favorites-tab-array_faded-applied.webp)
+
+![The Presets tab, with saved presets for 3D Blocks and 3D Mesh](docs/screenshots/presets-tab-3d_blocks.webp)
+
 **Applying**
 - Three apply modes, all undoable with Ctrl+Z:
   - *New layer*: the result goes on a new layer above.
@@ -40,6 +48,8 @@ Krita's built-in G'MIC window blocks Krita while it is open. G'MIC Studio is a d
 - Works with selections (also soft edges) and with 8-bit and 16-bit RGBA layers.
 - "Force transparent background" (off by default) removes the background color that some filters paint over empty areas.
 - Some filters change the image size. The preview then shows a dashed frame for the original size. The **Crop** button ("Keep the original size") cuts a bigger result to the original size, around the center. A smaller result is padded. If Crop is off, the result keeps its full size as a larger layer.
+
+![The 3D Blocks filter, with a dashed frame in the preview showing the original size](docs/screenshots/3d_blocks-size_change-crop_frame.webp)
 
 ## Requirements
 
@@ -65,6 +75,8 @@ Krita's built-in G'MIC window blocks Krita while it is open. G'MIC Studio is a d
 5. Click **Apply**. Use **Stop** to cancel a filter that is still running.
 
 The filter list comes from G'MIC's own `update*.gmic` file or from Krita's G'MIC-Qt cache (`~/.config/gmic/gmic_qt_filters.dat`), whichever is newer. *Settings > Update filter list* downloads the newest definitions. This is the only time the plugin uses the internet, and only when you ask.
+
+![The G'MIC Studio settings dialog](docs/screenshots/settings-dialog.webp)
 
 ## Why a separate gmic?
 
